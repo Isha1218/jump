@@ -77,8 +77,10 @@ def import_visits(conn: sqlite3.Connection, history_path: Path, now: float) -> t
         max_id = hc.execute("SELECT COALESCE(MAX(id), 0) FROM visits").fetchone()[0]
         if max_id < last_id:  # history was cleared and ids restarted
             last_id = 0
+        cols = {r["name"] for r in hc.execute("PRAGMA table_info(visits)")}
+        opener = "v.opener_visit" if "opener_visit" in cols else "0"
         rows = hc.execute(
-            "SELECT v.id, v.visit_time, v.from_visit, v.transition, v.visit_duration, "
+            f"SELECT v.id, v.visit_time, v.from_visit, {opener} AS opener_visit, v.transition, v.visit_duration, "
             "u.url, u.title, u.typed_count FROM visits v JOIN urls u ON u.id = v.url "
             "WHERE v.id > ? AND v.visit_time >= ? ORDER BY v.id",
             (last_id, cutoff),
@@ -90,7 +92,8 @@ def import_visits(conn: sqlite3.Connection, history_path: Path, now: float) -> t
             url = urls.normalize(r["url"])
             if not url:
                 continue
-            from_url = _referrer(hc, r["from_visit"]) if r["from_visit"] else None
+            ref = r["from_visit"] or r["opener_visit"]  # opener: opened in a new tab from that visit
+            from_url = _referrer(hc, ref) if ref else None
             conn.execute(
                 "INSERT OR REPLACE INTO visits(chrome_id, url, ts, transition, duration_s, from_url, typed_count) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",

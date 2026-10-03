@@ -61,3 +61,11 @@ def test_reads_copy_with_journal_present(conn, tmp_path):
     h.visit("https://x.edu/a", NOW - 5)
     (tmp_path / "History-journal").write_bytes(b"")
     assert history.import_visits(conn, h.path, NOW)[0] == 1
+
+
+def test_opener_visit_is_referrer_fallback(conn, tmp_path):
+    h = FakeHistory(tmp_path / "History")
+    s = h.visit("https://search.example/s?q=x", NOW - 30)
+    h.visit("https://x.edu/new-tab", NOW - 20, opener_visit=s)
+    history.import_visits(conn, h.path, NOW)
+    assert _rows(conn)[1]["from_url"] == "https://search.example/s?q=x"

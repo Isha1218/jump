@@ -74,7 +74,8 @@ def test_hubs_detected_by_behavior():
     visits = []
     for i, dest in enumerate(["https://a.com/x", "https://b.org/y", "https://c.net/z"]):
         q = f"https://search.example/s?q=term{i}"
-        visits += [{"url": q, "from_url": None}, {"url": dest, "from_url": q}]
+        visits += [{"url": q, "from_url": None, "ts": 0}, {"url": dest, "from_url": q, "ts": 1},
+                   {"url": q, "from_url": None, "ts": 2}]  # came back to the results the same day
     # a non-hub: same path, many queries, but you never leave the site from it
     for i in range(4):
         visits.append({"url": f"https://shop.example/item?id={i}", "from_url": None})
@@ -85,3 +86,26 @@ def test_hubs_detected_by_behavior():
 def test_alias_from_host():
     assert places.alias("https://www.bbc.co.uk", "/") == "bbc"
     assert places.alias("https://docs.python.org", "/3/") == "python"
+
+
+def test_opaque_ids_make_communities_tenants():
+    got = _group({
+        "https://forum.example/r/rust/comments/1n2xyz/borrow_checker_help/": 2,
+        "https://forum.example/r/rust/comments/1q9abc/async_traits/": 1,
+        "https://forum.example/r/golang/comments/2k3def/generics_question/": 2,
+    })
+    rust = [s for s in got if s.startswith("https://forum.example/r/rust/")]
+    golang = [s for s in got if s.startswith("https://forum.example/r/golang/")]
+    assert len(rust) == len(golang) == 1 and len(got) == 2      # split per community, never at /r/
+
+
+def test_pass_through_page_with_repeated_queries_is_hub():
+    visits = []
+    for i, dest in enumerate(["https://a.com/", "https://b.org/", "https://c.net/", "https://a.com/x"]):
+        login = f"https://sso.example/login?step={i % 2}"            # only 2 distinct queries over 4 days
+        visits += [{"url": login, "from_url": None, "ts": i * 86400, "duration_s": 2},
+                   {"url": dest, "from_url": login, "ts": i * 86400 + 5}]
+    assert places.find_hubs(visits) == {"https://sso.example/login"}
+    for v in visits:
+        v["duration_s"] = 120 if "sso" in v["url"] else 0
+    assert places.find_hubs(visits) == set()                          # same pattern, but you stay: not a hub

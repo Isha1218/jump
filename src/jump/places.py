@@ -1,16 +1,17 @@
 """Hub detection and grouping of visited URLs into places, from behavior and URL structure only.
 
-Hubs: an origin+path visited >= HUB_MIN_VISITS times, with >= HUB_DISTINCT_QUERIES of those visits
-having distinct query strings, from which you navigated out to >= HUB_MIN_OUT_ORIGINS other origins
-(search results, feeds). Hub URLs are never part of a place.
+Hubs: an origin+path visited >= HUB_MIN_VISITS times, from which you navigated out to
+>= HUB_MIN_OUT_ORIGINS other origins, whose (query, day) visits mostly have distinct query strings
+(>= HUB_DISTINCT_QUERIES, or >= HUB_DISTINCT_QUERIES_BRIEF when dwell is almost always a bounce):
+search results, feeds, login redirects. Hub URLs are never part of a place.
 
 Places: per origin, build a trie over each URL's *directory* (path up to its last "/"; a page `/a/b`
 sitting next to a directory `/a/b/` is treated as that directory's index). Weight = page-days (sum over
 URLs of distinct days visited). Walk down from the root; at each node:
   1. Tenants: children whose subtrees share URL shapes are interchangeable instances (owners, repos,
-     courses). The shape of a URL below child c is its templated path after c with the first segment
-     blanked; two shapes are alike if equally long (>= 2) and agree on at least half of the remaining
-     positions. Descend into every child alike to some other child.
+     courses). The shape of a URL below child c is its templated path after c (numbers -> {n},
+     opaque ids -> {id}) with the first segment blanked; two shapes are alike if equally long (>= 2)
+     and agree on at least half of the remaining positions. Descend into every child alike to some other child.
   2. Concentration: else if one child holds >= CONCENTRATION of the node's weight, descend into it.
   3. Otherwise stop: the node is the place (its children are sections, e.g. /api, /payments).
 URLs not carried down (the node's own pages, non-tenant children) form a place at the node.
@@ -23,12 +24,16 @@ from math import ceil
 from urllib.parse import unquote, urlsplit
 
 from . import urls as U
+from .config import BOUNCE_SECONDS
 
 HUB_MIN_VISITS = 3
 HUB_DISTINCT_QUERIES = 0.8
 HUB_MIN_OUT_ORIGINS = 3
+HUB_DISTINCT_QUERIES_BRIEF = 0.5   # pass-through pages (login redirects) need fewer distinct queries...
+HUB_BRIEF = 0.8                    # ...if this share of known dwell times are bounces
 CONCENTRATION = 0.8
 MAX_DEPTH = 4
+ID_LIKE = re.compile(r"(?=.*\d)(?=.*[a-zA-Z])[A-Za-z0-9_-]{5,}")   # opaque ids like 1n2xyz
 TERMISH = re.compile(r"^(\d+[a-z]{0,2}|[a-z]?\d+|[0-9a-f-]{12,})$", re.I)
 
 
@@ -68,21 +73,38 @@ def directory(url: str) -> str:
 
 def find_hubs(visits: list[dict]) -> set[str]:
     """origin+path keys that behave like search/feed pages."""
-    queries: dict[str, list[str]] = defaultdict(list)
+    queries: dict[str, list[tuple]] = defaultdict(list)
+    dwell: dict[str, list[float]] = defaultdict(list)
     out: dict[str, set[str]] = defaultdict(set)
     for v in visits:
-        queries[path_key(v["url"])].append(urlsplit(v["url"]).query)
+        key = path_key(v["url"])
+        queries[key].append((urlsplit(v["url"]).query, int(v.get("ts", 0) // 86400)))
+        if v.get("duration_s"):
+            dwell[key].append(v["duration_s"])
         if v.get("from_url") and U.origin(v["url"]) != U.origin(v["from_url"]):
             out[path_key(v["from_url"])].add(U.origin(v["url"]))
-    return {k for k, qs in queries.items()
-            if len(qs) >= HUB_MIN_VISITS and len(set(qs)) >= HUB_DISTINCT_QUERIES * len(qs)
-            and len(out[k]) >= HUB_MIN_OUT_ORIGINS}
+    hubs = set()
+    for k, qs in queries.items():
+        if len(qs) < HUB_MIN_VISITS or len(out[k]) < HUB_MIN_OUT_ORIGINS:
+            continue
+        sessions = set(qs)  # going back to the same results page the same day is one visit
+        distinct = len({q for q, _ in sessions}) / len(sessions)
+        brief = bool(dwell[k]) and sum(d < BOUNCE_SECONDS for d in dwell[k]) >= HUB_BRIEF * len(dwell[k])
+        if distinct >= HUB_DISTINCT_QUERIES or (brief and distinct >= HUB_DISTINCT_QUERIES_BRIEF):
+            hubs.add(k)
+    return hubs
+
+
+def _seg_shape(seg: str) -> str:
+    if ID_LIKE.fullmatch(seg):
+        return "{id}"
+    return U.url_template("http://h/" + seg).split("/", 1)[1]
 
 
 def _shapes(url: str, depth: int) -> tuple[str, ...] | None:
     """Templated path below the child at `depth`, first segment blanked; None if too short to compare."""
-    segs = [s for s in U.url_template(url).split("/")[1:] if s][depth + 1:]
-    return ("*", *segs[1:]) if len(segs) >= 2 else None
+    segs = U.path_segments(url)[depth + 1:]
+    return ("*", *map(_seg_shape, segs[1:])) if len(segs) >= 2 else None
 
 
 def _alike(a: tuple[str, ...], b: tuple[str, ...]) -> bool:
