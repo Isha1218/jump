@@ -38,8 +38,11 @@ class Debouncer:
             return True
         return now - self.last_run >= self.fallback_s
 
-    def ran(self, now: float) -> None:
-        self.last_run, self.last_change = now, None
+    def ran(self, started: float) -> None:
+        """Mark a run that began at `started`; changes that arrived during the run stay pending."""
+        self.last_run = started
+        if self.last_change is not None and self.last_change <= started:
+            self.last_change = None
 
 
 class _HistoryHandler(FileSystemEventHandler):
@@ -117,12 +120,13 @@ def run(conn: sqlite3.Connection, history_path: Path | None = None, stop: thread
                 due = first or debouncer.due(time.time())
             if due:
                 first = False
+                started = time.time()
                 try:
                     log.info("cycle %s", watch_cycle(conn, history_path))
                 except Exception:
                     log.exception("watch cycle failed")
                 with lock:
-                    debouncer.ran(time.time())
+                    debouncer.ran(started)
             stop.wait(tick_s)
     finally:
         stop.set()

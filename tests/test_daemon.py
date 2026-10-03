@@ -21,6 +21,16 @@ def test_debouncer_waits_for_quiet_then_runs():
     assert d.due(665)             # fallback timer
 
 
+def test_change_during_a_run_is_not_lost():
+    d = daemon.Debouncer(debounce_s=30, fallback_s=600, now=0)
+    d.touch(0)
+    started = 30                  # run begins
+    d.touch(31)                   # Chrome writes History while the run is in progress
+    d.ran(started)
+    assert d.last_change == 31
+    assert d.due(61)
+
+
 def _stub_agents(monkeypatch, calls):
     watcher = types.ModuleType("jump.agents.watcher")
     planner = types.ModuleType("jump.agents.planner")
@@ -33,6 +43,7 @@ def _stub_agents(monkeypatch, calls):
     def p_run(conn, now=None):
         calls.append("plan")
         jobs.post(conn, "crawl", {"place_id": 1, "budget": 3}, dedupe_key="1")
+        time.sleep(0.5)           # slow cycle: the History write below lands mid-run (the CI race)
         return {}
 
     def c_run(conn, max_jobs=None, fetch=None, delay=None):
