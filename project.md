@@ -11,6 +11,7 @@ Multi-agent "blackboard": background agents (Watcher → Planner → Crawlers) c
 ## Key Files
 - `src/jump/db.py` schema + helpers · `jobs.py` queue · `urls.py` URL helpers · `config.py` all constants
 - `src/jump/agents/` watcher, planner, crawler · `src/jump/search/` retriever, jev, pipeline · `src/jump/daemon.py`
+- `src/jump/crawl/` parse (links + row context) · fetch (httpx, robots cache) · priority (rarity, lazy best-first frontier)
 - `src/jump/cli.py` `jump` command
 
 ## How to Run
