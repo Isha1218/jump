@@ -67,14 +67,14 @@ def test_run_cycles_agents_and_drains_crawl_jobs(tmp_path, monkeypatch):
     history.write_bytes(b"")
     monkeypatch.setattr(daemon, "WORKER_IDLE_S", 0.05)
     stop = threading.Event()
+    debouncer = daemon.Debouncer(debounce_s=0.2, fallback_s=60)
     t = threading.Thread(target=daemon.run, kwargs=dict(
-        conn=conn, history_path=history, stop=stop, workers=2,
-        debouncer=daemon.Debouncer(debounce_s=0.2, fallback_s=60), tick_s=0.05))
+        conn=conn, history_path=history, stop=stop, workers=2, debouncer=debouncer, tick_s=0.05))
     t.start()
     deadline = time.time() + 5
     while "crawl" not in calls and time.time() < deadline:
         time.sleep(0.05)
-    history.write_bytes(b"changed")          # simulate Chrome writing History
+    debouncer.touch(time.time())             # a History change (real file events: test below)
     while calls.count("watch") < 2 and time.time() < deadline:
         time.sleep(0.05)
     stop.set()
@@ -84,6 +84,26 @@ def test_run_cycles_agents_and_drains_crawl_jobs(tmp_path, monkeypatch):
     assert "crawl" in calls
     assert calls.count("watch") >= 2, "History change should trigger another watcher run"
     assert conn.execute("SELECT COUNT(*) FROM jobs WHERE type='crawl' AND status='done'").fetchone()[0] >= 1
+
+
+def test_history_file_events_reach_the_debouncer(tmp_path):
+    from watchdog.observers import Observer
+
+    history = tmp_path / "History"
+    history.write_bytes(b"")
+    d = daemon.Debouncer(now=0)
+    observer = Observer()
+    observer.schedule(daemon._HistoryHandler({"History"}, d, threading.Lock()), str(tmp_path), recursive=False)
+    observer.start()
+    try:
+        deadline = time.time() + 5
+        while d.last_change is None and time.time() < deadline:
+            history.write_bytes(str(time.time()).encode())   # keep writing: the observer starts asynchronously
+            time.sleep(0.2)
+    finally:
+        observer.stop()
+        observer.join()
+    assert d.last_change is not None
 
 
 def test_stale_running_jobs_are_requeued(tmp_path):
