@@ -33,18 +33,19 @@ Each module owns its tables' writes as listed. Function names below are called b
 - Writes: `places.budget`, `jobs(crawl)`.
 
 ### Crawler — `jump.agents.crawler`, `jump.crawl.*`
-- `crawler.run_pending(conn, max_jobs=None, fetch=None) -> dict` — claim `crawl` jobs one at a time and run them. `fetch` injectable for tests.
-- `crawler.crawl_place(conn, place_id, budget, fetch=None) -> dict` — best-first crawl seeded from the place's visited pages. Link priority = `parent · HOP_DECAY · rarity · scope · (1 + pattern)`; rarity = `ln(N/n)/ln(N)` over pages in the place containing the link; scope: deeper 1, sideways `SIDEWAYS_FACTOR`, outside 0 (record as unfetched page + link only); pattern = share of visited pages in the place sharing the link's `url_template`. Stop at `MIN_PRIORITY` or budget. robots.txt respected, `CRAWL_DELAY_S` between requests, GET only, skip `is_action_url`, never fetch non-HTML kinds (index them via link text).
+- `crawler.run_pending(conn, max_jobs=None, fetch=None, delay=None) -> dict` — claim `crawl` jobs one at a time and run them. `fetch` injectable for tests.
+- `crawler.crawl_place(conn, place_id, budget, fetch=None, delay=None) -> dict` — best-first crawl seeded from the place's visited pages. Link priority = `parent · HOP_DECAY · rarity · scope · (1 + pattern)`; rarity = `ln(N/n)/ln(N)` over pages in the place containing the link; scope: deeper 1, sideways `SIDEWAYS_FACTOR`, outside 0 (record as unfetched page + link only); pattern = share of visited pages in the place sharing the link's `url_template`. Stop at `MIN_PRIORITY` or budget. robots.txt respected, `CRAWL_DELAY_S` between requests, GET only, skip `is_action_url`, never fetch non-HTML kinds (index them via link text).
 - Parsing: title, h1–h3 headings, snippet, links with anchor text and enclosing row/list-item context.
 - Writes: `pages` (crawled + discovered), `links`, `places.last_crawled`.
 
 ### Search — `jump.search.retriever`, `jump.search.jev`, `jump.search.pipeline`
 - `retriever.sync_fts(conn) -> int` — rebuild FTS rows for `fts_dirty` pages (title, snippet, headings, incoming anchors, incoming contexts, `url_words`); clear the flag.
-- `retriever.retrieve(conn, query, k=CANDIDATES) -> list[dict]` — BM25 over FTS × `(0.5 + revisit)` × `(1 + picks)`; dicts have `page_id, url, label, description, score`.
-- `jev.rank(query, candidates, api_key) -> list[float] | None` — one `choice` question; returns probability per candidate, None on any failure.
-- `pipeline.search(conn, query, use_jev=True) -> list[dict]` — retrieve → Jev (if key) → top `RESULTS`, each with `page_id, url, label, probability|None`.
+- `retriever.retrieve(conn, query, k=CANDIDATES) -> list[dict]` — (BM25 + 2 per matched term) × `(0.5 + revisit)` × `(1 + picks)`; revisit = max(page, its place), else max of places linking to it; alias match ×3. Dicts have `page_id, url, kind, label, description, score`.
+- `jev.rank(query, candidates, api_key, client=None) -> list[float] | None` — one `choice` question; returns probability per candidate, None on any failure. `jev.rank_with_confidence` also returns Jev's choice + confidence.
+- `pipeline.search(conn, query, use_jev=True, api_key=None, client=None) -> list[dict]` — retrieve → Jev (if key, >1 candidate) → top `RESULTS`, each with `page_id, url, label, kind, probability|None`.
 - `pipeline.record_pick(conn, query, page_id)`, `pipeline.open_in_browser(url)` (macOS `open -a "Google Chrome"`).
 - Writes: FTS table, `picks`.
 
 ### Daemon — `jump.daemon`
-- `daemon.run(conn)` — watcher triggered by History file changes (debounced) + fallback timer; planner after watcher; crawler worker threads (own connections) draining `crawl` jobs.
+- `daemon.run(conn, history_path=None, stop=None, workers=2, debouncer=None)` — watcher triggered by History file changes (30s debounce, changes during a run stay pending) + 10-min fallback timer; planner after watcher; crawler worker threads (own connections) draining `crawl` jobs; stale `running` jobs requeued on start.
+- `jump.service.install(load=False)` / `uninstall()` — launchd agent (`~/Library/LaunchAgents/com.jump.daemon.plist`): start at login, restart on crash.
