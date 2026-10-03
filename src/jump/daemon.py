@@ -66,10 +66,11 @@ def watch_cycle(conn: sqlite3.Connection, history_path: Path | None = None) -> d
     return {"watcher": watcher.run_once(conn, history_path=history_path), "planner": planner.run_once(conn)}
 
 
-def crawl_worker(path: str, stop: threading.Event, idle_s: float = WORKER_IDLE_S) -> None:
+def crawl_worker(path: str, stop: threading.Event, idle_s: float | None = None) -> None:
     """Drain `crawl` jobs one at a time with its own connection until `stop` is set."""
     from .agents import crawler
 
+    idle_s = WORKER_IDLE_S if idle_s is None else idle_s
     conn = db.connect(path)
     while not stop.is_set():
         if not conn.execute("SELECT 1 FROM jobs WHERE type = 'crawl' AND status = 'pending' LIMIT 1").fetchone():

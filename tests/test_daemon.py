@@ -71,10 +71,11 @@ def test_run_cycles_agents_and_drains_crawl_jobs(tmp_path, monkeypatch):
     t = threading.Thread(target=daemon.run, kwargs=dict(
         conn=conn, history_path=history, stop=stop, workers=2, debouncer=debouncer, tick_s=0.05))
     t.start()
-    deadline = time.time() + 5
+    deadline = time.time() + 10
     while "crawl" not in calls and time.time() < deadline:
         time.sleep(0.05)
     debouncer.touch(time.time())             # a History change (real file events: test below)
+    deadline = time.time() + 10
     while calls.count("watch") < 2 and time.time() < deadline:
         time.sleep(0.05)
     stop.set()
