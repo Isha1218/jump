@@ -14,6 +14,9 @@ Multi-agent "blackboard": background agents (Watcher → Planner → Crawlers) c
 - `src/jump/crawl/` parse (links + row context) · fetch (httpx, robots cache) · priority (rarity, lazy best-first frontier)
 - `src/jump/cli.py` `jump` command
 
+## Status
+Backend v0 done (watcher, planner, crawler, search, daemon), CI on every PR. Next: Chrome extension (live visits, logged-in crawling), Raycast UI, learned score weights.
+
 ## How to Run
 ```
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
@@ -22,4 +25,5 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/jump plan && .venv/bin/jump crawl            # crawl active places
 .venv/bin/jump search "452 rpc lecture"                # JEV_API_KEY=... to enable Jev
 .venv/bin/jump daemon                                  # run all agents continuously
+.venv/bin/jump service install --load                  # keep the daemon running via launchd
 ```
