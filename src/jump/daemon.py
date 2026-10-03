@@ -38,8 +38,11 @@ class Debouncer:
             return True
         return now - self.last_run >= self.fallback_s
 
-    def ran(self, now: float) -> None:
-        self.last_run, self.last_change = now, None
+    def ran(self, started: float) -> None:
+        """Mark a run that began at `started`; changes that arrived during the run stay pending."""
+        self.last_run = started
+        if self.last_change is not None and self.last_change <= started:
+            self.last_change = None
 
 
 class _HistoryHandler(FileSystemEventHandler):
@@ -63,10 +66,11 @@ def watch_cycle(conn: sqlite3.Connection, history_path: Path | None = None) -> d
     return {"watcher": watcher.run_once(conn, history_path=history_path), "planner": planner.run_once(conn)}
 
 
-def crawl_worker(path: str, stop: threading.Event, idle_s: float = WORKER_IDLE_S) -> None:
+def crawl_worker(path: str, stop: threading.Event, idle_s: float | None = None) -> None:
     """Drain `crawl` jobs one at a time with its own connection until `stop` is set."""
     from .agents import crawler
 
+    idle_s = WORKER_IDLE_S if idle_s is None else idle_s
     conn = db.connect(path)
     while not stop.is_set():
         if not conn.execute("SELECT 1 FROM jobs WHERE type = 'crawl' AND status = 'pending' LIMIT 1").fetchone():
@@ -117,12 +121,13 @@ def run(conn: sqlite3.Connection, history_path: Path | None = None, stop: thread
                 due = first or debouncer.due(time.time())
             if due:
                 first = False
+                started = time.time()
                 try:
                     log.info("cycle %s", watch_cycle(conn, history_path))
                 except Exception:
                     log.exception("watch cycle failed")
                 with lock:
-                    debouncer.ran(time.time())
+                    debouncer.ran(started)
             stop.wait(tick_s)
     finally:
         stop.set()
