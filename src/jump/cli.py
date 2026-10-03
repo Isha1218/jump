@@ -51,6 +51,16 @@ def _daemon(conn, args):
     daemon.run(conn)
 
 
+def _service(conn, args):
+    from . import service
+    if args.action == "install":
+        path = service.install(load=args.load)
+        print(f"wrote {path}" + ("" if args.load else f"\nstart it with: launchctl load {path}"))
+    else:
+        service.uninstall()
+        print("removed launchd agent")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="jump", description="Say a phrase, land on the page.")
     ap.add_argument("--db", help="database path (default ~/.jump/graph.db)")
@@ -72,6 +82,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--open", action="store_true", help="pick a result and open it in Chrome")
     p.set_defaults(fn=_search)
     sub.add_parser("daemon", help="run all background agents").set_defaults(fn=_daemon)
+    p = sub.add_parser("service", help="install/uninstall the launchd agent that keeps the daemon running")
+    p.add_argument("action", choices=["install", "uninstall"])
+    p.add_argument("--load", action="store_true", help="also start it now with launchctl")
+    p.set_defaults(fn=_service)
 
     args = ap.parse_args(argv)
     conn = db.connect(args.db)
