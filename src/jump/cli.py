@@ -37,6 +37,9 @@ def _places(conn, args):
 def _search(conn, args):
     from .search import pipeline
     results = pipeline.search(conn, args.query, use_jev=not args.local)
+    if args.json:
+        print(json.dumps(results))
+        return
     for i, r in enumerate(results, 1):
         conf = f"  ({r['probability']:.2f})" if r.get("probability") is not None else ""
         print(f"{i}. {r['label']}{conf}\n   {r['url']}")
@@ -92,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("query")
     p.add_argument("--local", action="store_true", help="skip Jev, use local ranking only")
     p.add_argument("--open", action="store_true", help="pick a result and open it in Chrome")
+    p.add_argument("--json", action="store_true", help="print results as JSON (used by the Raycast command)")
     p.set_defaults(fn=_search)
     sub.add_parser("daemon", help="run all background agents").set_defaults(fn=_daemon)
     p = sub.add_parser("service", help="install/uninstall the launchd agent that keeps the daemon running")
