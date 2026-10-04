@@ -132,8 +132,8 @@ def description_for(page, label: str, site: str, anchors: list[str], contexts: l
 
 
 def _url_key(url: str) -> str:
-    p = urlsplit(url)
-    return f"{(p.hostname or '').removeprefix('www.')}{p.path.rstrip('/')}?{p.query}"
+    """Lookalike pages share a key: same site + URL pattern (discussion/123 and discussion/456 collapse)."""
+    return urls.url_template(url).removeprefix("www.")
 
 
 def retrieve(conn: sqlite3.Connection, query: str, k: int = CANDIDATES) -> list[dict]:
@@ -179,7 +179,8 @@ def retrieve(conn: sqlite3.Connection, query: str, k: int = CANDIDATES) -> list[
         label = r["name"] or label_for(r, anchors, contexts)
         site = r["site"] or sites.get(r["id"]) or urlsplit(r["url"]).hostname or ""
         out.append({"page_id": r["id"], "url": r["url"], "kind": r["kind"], "label": label,
-                    "description": description_for(r, label, site, anchors, contexts), "score": r["score"]})
+                    "description": description_for(r, label, site, anchors, contexts), "score": r["score"],
+                    "picks": r["npicks"]})
     return out
 
 

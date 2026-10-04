@@ -10,6 +10,8 @@ import httpx
 from .. import config
 from . import jev, retriever
 
+MIN_PROBABILITY = 0.1
+
 
 def search(conn: sqlite3.Connection, query: str, use_jev: bool = True, api_key: str | None = None,
            client: httpx.Client | None = None) -> list[dict]:
@@ -19,12 +21,14 @@ def search(conn: sqlite3.Connection, query: str, use_jev: bool = True, api_key: 
     key = api_key or config.JEV_API_KEY
     if use_jev and key and len(cands) > 1:
         probs = jev.rank(query, cands, key, client=client)
-    order = range(len(cands))
+    order = list(range(len(cands)))
     if probs:
-        order = sorted(order, key=lambda i: -probs[i])   # stable: ties keep retriever order
+        # pages you've opened before count extra; hide anything Jev considers unlikely
+        order = sorted((i for i in order if probs[i] >= MIN_PROBABILITY),
+                       key=lambda i: -probs[i] * (1 + cands[i]["picks"]))   # stable: ties keep retriever order
     return [{"page_id": cands[i]["page_id"], "url": cands[i]["url"], "label": cands[i]["label"],
              "kind": cands[i]["kind"], "probability": probs[i] if probs else None}
-            for i in list(order)[:config.RESULTS]]
+            for i in order[:config.RESULTS]]
 
 
 def record_pick(conn: sqlite3.Connection, query: str, page_id: int) -> None:

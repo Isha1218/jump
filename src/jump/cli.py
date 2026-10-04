@@ -65,6 +65,11 @@ def _monitor(conn, args):
         stop.set()
 
 
+def _pick(conn, args):
+    from .search import pipeline
+    pipeline.record_pick(conn, args.query, args.page_id)
+
+
 def _daemon(conn, args):
     from . import daemon
     daemon.run(conn)
@@ -85,6 +90,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--db", help="database path (default ~/.jump/graph.db)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    p = sub.add_parser("pick", help="record that a search result was opened (used by Raycast)")
+    p.add_argument("page_id", type=int)
+    p.add_argument("--query", required=True)
+    p.set_defaults(fn=_pick)
     sub.add_parser("monitor", help="record what you look at in Chrome (foreground)").set_defaults(fn=_monitor)
     sub.add_parser("watch", help="regroup and rescore places from recorded visits").set_defaults(fn=_watch)
     sub.add_parser("plan", help="assign crawl budgets and queue crawl jobs").set_defaults(fn=_plan)
