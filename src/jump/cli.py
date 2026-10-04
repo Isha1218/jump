@@ -46,6 +46,17 @@ def _search(conn, args):
         pipeline.open_in_browser(results[choice - 1]["url"])
 
 
+def _monitor(conn, args):
+    import threading
+    from .monitor import Monitor
+    print("Watching the active Chrome tab. Ctrl-C to stop.")
+    stop = threading.Event()
+    try:
+        Monitor(conn).run(stop)
+    except KeyboardInterrupt:
+        stop.set()
+
+
 def _daemon(conn, args):
     from . import daemon
     daemon.run(conn)
@@ -66,7 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--db", help="database path (default ~/.jump/graph.db)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("watch", help="read new Chrome history and rescore places").set_defaults(fn=_watch)
+    sub.add_parser("monitor", help="record what you look at in Chrome (foreground)").set_defaults(fn=_monitor)
+    sub.add_parser("watch", help="regroup and rescore places from recorded visits").set_defaults(fn=_watch)
     sub.add_parser("plan", help="assign crawl budgets and queue crawl jobs").set_defaults(fn=_plan)
     p = sub.add_parser("crawl", help="run pending crawl jobs")
     p.add_argument("--max-jobs", type=int, default=None)

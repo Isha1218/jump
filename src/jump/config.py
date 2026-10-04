@@ -4,16 +4,10 @@ from pathlib import Path
 
 HOME = Path(os.environ.get("JUMP_HOME", Path.home() / ".jump"))
 DB_PATH = HOME / "graph.db"
-CHROME_HISTORY = Path(
-    os.environ.get(
-        "JUMP_CHROME_HISTORY",
-        Path.home() / "Library/Application Support/Google/Chrome/Default/History",
-    )
-)
 JEV_API_KEY = os.environ.get("JEV_API_KEY")  # optional; search falls back to local ranking
 
 # Watcher: revisit scoring
-HISTORY_WINDOW_DAYS = 90
+HISTORY_WINDOW_DAYS = 90         # visits older than this are ignored
 DAY_HALF_LIFE_DAYS = 14          # a visit 14 days ago counts half
 PAGE_HALF_LIFE_DAYS = 7          # single pages fade faster than places
 BOUNCE_SECONDS = 10

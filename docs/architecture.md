@@ -4,7 +4,7 @@ Two halves share one SQLite database (`~/.jump/graph.db`, schema in `src/jump/db
 
 ```
 BACKGROUND (daemon)                                   FOREGROUND (jump search)
-Chrome History ─► WATCHER ─rescored─► PLANNER ─crawl─► CRAWLER ×N      query ─► RETRIEVER ─► ≤200 ─► JEV ─► top 5
+Active Chrome tab ─► MONITOR ─visits─► WATCHER ─rescored─► PLANNER ─crawl─► CRAWLER ×N      query ─► RETRIEVER ─► ≤200 ─► JEV ─► top 5
                      │                   │                │                        │
                      └──────────── SQLite: places · pages · links · visits · jobs · picks ────────────┘
 ```
@@ -21,12 +21,15 @@ Each module owns its tables' writes as listed. Function names below are called b
 - `jump.jobs` — `post()`, `claim()`, `finish()`, `requeue_stale()`.
 - `jump.urls` — `normalize()`, `origin()`, `path_segments()`, `kind_from_url()`, `url_template()`, `in_scope()`, `relation()`, `is_action_url()`, `url_words()`.
 
-### Watcher — `jump.agents.watcher`, `jump.history`, `jump.places`, `jump.scoring`
-- `watcher.run_once(conn, history_path=None, now=None) -> dict` — copy Chrome History (it is locked while Chrome runs), import new visits into `visits` (incremental by Chrome visit id, `meta['history_last_id']`), group URLs into places, detect hubs, compute revisit scores, set place status, upsert visited pages (`visited=1`, `place_id`, `revisit`), post `rescored` jobs `{place_id}` (dedupe key = place id) when |Δrevisit| ≥ `RESCORE_DELTA`. Returns a summary dict (counts).
-- Writes: `visits`, `places`, `pages` (visited pages only), `jobs(rescored)`, `meta`.
-- Place grouping by **path fan-out** (no site lists): scope boundary = first path depth where distinct-child count jumps.
-- Hubs (search engines, feeds) by behavior: short dwell, outbound to many distinct origins, URL differs mostly by a free-text query param → status `hub`, never crawled.
-- Revisit score: `x = 1.5·ln(1+days) + 1.0·typed + 0.5·ln(1+breadth) − 1.0·bounce + 0.5·regular − 3`, `revisit = sigmoid(x)`. `days` = Σ over distinct visit days of `0.5^(age/14)`. Status: ≥0.5 active, ≥0.2 probation (dropped after 14 days without promotion), else dropped. Features stored as JSON in `places.features`.
+### Monitor — `jump.monitor`
+- `Monitor(conn, chrome=None).tick(now)` / `.run(stop, poll_s=POLL_S)` — every 2s asks Chrome (AppleScript) for the frontmost window's active tab. A visit starts when the URL/tab changes and ends when it changes again or Chrome isn't frontmost; stored in `visits` with real `duration_s` and `from_url` = previous URL in the same tab. Incognito and non-web tabs are ignored. After 3s on a page, reads the rendered `<main>` (or `<body>`) via JavaScript: h1–h3 + first 300 chars → `pages.headings/snippet`; title → `pages.title`.
+- Needs Chrome → View → Developer → *Allow JavaScript from Apple Events* for text (visits are recorded without it). `transition` is always 0 (LINK), so the typed-share feature is 0.
+
+### Watcher — `jump.agents.watcher`, `jump.places`, `jump.scoring`
+- `watcher.run_once(conn, now=None) -> dict` — over visits in the last `HISTORY_WINDOW_DAYS`: detect hubs, group URLs into places, compute revisit scores, set place status, upsert visited pages (`visited=1`, `place_id`, `revisit`), post `rescored` jobs `{place_id}` when a place is new, changes status or |Δrevisit| ≥ `RESCORE_DELTA`. One transaction; idempotent.
+- Hubs (search results, login redirects) by behavior: same path with mostly distinct queries linking out to many origins, or mostly bounces. Never stored as places or pages.
+- Places by path structure: split a level into tenants when children's subtrees share URL shapes (`github.com/<owner>/<repo>`); descend when one child holds ≥80% of visit-days; else the node is the place.
+- Revisit score: `x = 1.5·ln(1+days) + 1.0·typed + 0.5·ln(1+breadth) − 1.0·bounce + 0.5·regular − 3`, `revisit = sigmoid(x)`; `days` = Σ distinct visit days of `0.5^(age/14)`. ≥0.5 active, ≥0.2 probation (dropped 14 days after the last visit), else dropped.
 
 ### Planner — `jump.agents.planner`
 - `planner.run_once(conn, now=None) -> dict` — consume `rescored` jobs; for active places set `budget = round(MAX_BUDGET·revisit)`, others 0; post `crawl` jobs `{place_id, budget}` (dedupe key = place id) for active places never crawled or with `last_crawled` older than `REFRESH_AFTER_S`.
@@ -47,5 +50,5 @@ Each module owns its tables' writes as listed. Function names below are called b
 - Writes: FTS table, `picks`.
 
 ### Daemon — `jump.daemon`
-- `daemon.run(conn, history_path=None, stop=None, workers=2, debouncer=None)` — watcher triggered by History file changes (30s debounce, changes during a run stay pending) + 10-min fallback timer; planner after watcher; crawler worker threads (own connections) draining `crawl` jobs; stale `running` jobs requeued on start.
+- `daemon.run(conn, stop=None, workers=2, cycle_s=300, chrome=None)` — monitor thread; watcher → planner every `cycle_s`; crawler worker threads (own connections) draining `crawl` jobs; stale `running` jobs requeued on start.
 - `jump.service.install(load=False)` / `uninstall()` — launchd agent (`~/Library/LaunchAgents/com.jump.daemon.plist`): start at login, restart on crash.

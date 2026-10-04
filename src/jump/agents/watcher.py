@@ -1,10 +1,8 @@
-"""Watcher agent: Chrome history -> visits -> hubs, places, revisit scores -> `rescored` jobs."""
+"""Watcher agent: recorded visits -> hubs, places, revisit scores -> `rescored` jobs."""
 import sqlite3
 import time
 from collections import Counter, defaultdict
-from pathlib import Path
-
-from .. import config, db, history, jobs, places, scoring, urls
+from .. import config, db, jobs, places, scoring, urls
 
 
 def _status(revisit: float, last_visit: float, now: float) -> str:
@@ -31,13 +29,12 @@ def _rescore(conn, place_id: int, prev, revisit: float, status: str) -> int:
     return int(jobs.post(conn, "rescored", {"place_id": place_id}, dedupe_key=str(place_id)) is not None)
 
 
-def run_once(conn: sqlite3.Connection, history_path: Path | str | None = None, now: float | None = None) -> dict:
-    """Import new Chrome visits, regroup and rescore places, upsert visited pages. One transaction."""
+def run_once(conn: sqlite3.Connection, now: float | None = None) -> dict:
+    """Regroup and rescore places from the visits the monitor recorded, upsert visited pages. One transaction."""
     now = time.time() if now is None else now
-    path = Path(history_path) if history_path else config.CHROME_HISTORY
     conn.execute("BEGIN IMMEDIATE")
     try:
-        summary = _run(conn, path, now)
+        summary = _run(conn, now)
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
@@ -45,8 +42,7 @@ def run_once(conn: sqlite3.Connection, history_path: Path | str | None = None, n
     return summary
 
 
-def _run(conn: sqlite3.Connection, path: Path, now: float) -> dict:
-    new, titles = history.import_visits(conn, path, now)
+def _run(conn: sqlite3.Connection, now: float) -> dict:
     visits = [dict(r) for r in conn.execute(
         "SELECT url, ts, transition, duration_s, from_url FROM visits WHERE ts >= ?",
         (now - config.HISTORY_WINDOW_DAYS * 86400,))]
@@ -86,10 +82,8 @@ def _run(conn: sqlite3.Connection, path: Path, now: float) -> dict:
             _, page_rev = scoring.score_page(by_url[u], now, from_hub=is_hub)
             fields = {"place_id": pid, "visit_count": len(by_url[u]),
                       "last_visit": max(v["ts"] for v in by_url[u]), "revisit": round(page_rev, 4)}
-            if old_pages.get(u) == tuple(fields.values()) and u not in titles:
+            if old_pages.get(u) == tuple(fields.values()):
                 continue  # unchanged: don't mark it dirty for re-indexing
-            if u in titles:
-                fields["title"] = titles[u]
             db.upsert_page(conn, u, visited=1, kind=urls.kind_from_url(u), **fields)
             counts["pages_updated"] += 1
 
@@ -101,7 +95,7 @@ def _run(conn: sqlite3.Connection, path: Path, now: float) -> dict:
             counts["retired"] += 1
             counts["rescored_jobs"] += _rescore(conn, prev["id"], prev, 0.0, "dropped")
     return {
-        "new_visits": new, "visits": len(visits), "places": len(regular),
+        "visits": len(visits), "places": len(regular),
         "active": counts["active"], "probation": counts["probation"], "dropped": counts["dropped"],
         "hubs": len(hub_only), "hub_urls": len(hubs), "pages_updated": counts["pages_updated"],
         "retired": counts["retired"], "rescored_jobs": counts["rescored_jobs"],
