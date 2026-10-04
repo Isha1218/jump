@@ -23,13 +23,13 @@ Each module owns its tables' writes as listed. Function names below are called b
 
 ### Monitor — `jump.monitor`
 - `Monitor(conn, chrome=None).tick(now)` / `.run(stop, poll_s=POLL_S)` — every 2s asks Chrome (AppleScript) for the frontmost window's active tab. A visit starts when the URL/tab changes and ends when it changes again or Chrome isn't frontmost; stored in `visits` with real `duration_s` and `from_url` = previous URL in the same tab. Incognito and non-web tabs are ignored. After 3s on a page, reads the rendered `<main>` (or `<body>`) via JavaScript: h1–h3 + first 300 chars → `pages.headings/snippet`; title → `pages.title`.
-- Needs Chrome → View → Developer → *Allow JavaScript from Apple Events* for text (visits are recorded without it). `transition` is always 0 (LINK), so the typed-share feature is 0.
+- Needs Chrome → View → Developer → *Allow JavaScript from Apple Events* for text (visits are recorded without it).
 
 ### Watcher — `jump.agents.watcher`, `jump.places`, `jump.scoring`
 - `watcher.run_once(conn, now=None) -> dict` — over visits in the last `HISTORY_WINDOW_DAYS`: detect hubs, group URLs into places, compute revisit scores, set place status, upsert visited pages (`visited=1`, `place_id`, `revisit`), post `rescored` jobs `{place_id}` when a place is new, changes status or |Δrevisit| ≥ `RESCORE_DELTA`. One transaction; idempotent.
 - Hubs (search results, login redirects) by behavior: same path with mostly distinct queries linking out to many origins, or mostly bounces. Never stored as places or pages.
 - Places by path structure: split a level into tenants when children's subtrees share URL shapes (`github.com/<owner>/<repo>`); descend when one child holds ≥80% of visit-days; else the node is the place.
-- Revisit score: `x = 1.5·ln(1+days) + 1.0·typed + 0.5·ln(1+breadth) − 1.0·bounce + 0.5·regular − 3`, `revisit = sigmoid(x)`; `days` = Σ distinct visit days of `0.5^(age/14)`. ≥0.5 active, ≥0.2 probation (dropped 14 days after the last visit), else dropped.
+- Revisit score: `x = 1.5·ln(1+days) + 0.5·ln(1+breadth) − 1.0·bounce + 0.5·regular − 3`, `revisit = sigmoid(x)`; `days` = Σ distinct visit days of `0.5^(age/14)`. ≥0.5 active, ≥0.2 probation (dropped 14 days after the last visit), else dropped.
 
 ### Planner — `jump.agents.planner`
 - `planner.run_once(conn, now=None) -> dict` — consume `rescored` jobs; for active places set `budget = round(MAX_BUDGET·revisit)`, others 0; post `crawl` jobs `{place_id, budget}` (dedupe key = place id) for active places never crawled or with `last_crawled` older than `REFRESH_AFTER_S`.

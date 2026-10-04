@@ -51,15 +51,13 @@ CREATE TABLE IF NOT EXISTS links (
 );
 CREATE INDEX IF NOT EXISTS links_to ON links(to_id);
 
--- Raw Chrome visits, copied incrementally (chrome_id = Chrome's visits.id).
+-- Visits recorded by the monitor (one row per time you looked at a page).
 CREATE TABLE IF NOT EXISTS visits (
-  chrome_id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY,
   url TEXT NOT NULL,
   ts REAL NOT NULL,                    -- unix seconds
-  transition INTEGER NOT NULL,         -- Chrome core transition type (0-10)
   duration_s REAL NOT NULL DEFAULT 0,
-  from_url TEXT,                       -- URL of the referring visit, if known
-  typed_count INTEGER NOT NULL DEFAULT 0
+  from_url TEXT                        -- previous page in the same tab, if any
 );
 CREATE INDEX IF NOT EXISTS visits_url ON visits(url);
 CREATE INDEX IF NOT EXISTS visits_ts ON visits(ts);

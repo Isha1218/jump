@@ -112,7 +112,7 @@ class Monitor:
         if not cur:
             return
         self.conn.execute(
-            "INSERT INTO visits(url, ts, transition, duration_s, from_url) VALUES (?, ?, 0, ?, ?)",
+            "INSERT INTO visits(url, ts, duration_s, from_url) VALUES (?, ?, ?, ?)",
             (cur["url"], cur["start"], now - cur["start"], cur["from_url"]),
         )
         if cur["title"]:
