@@ -32,7 +32,8 @@ PROBATION_THRESHOLD = 0.2
 PROBATION_DAYS = 14
 RESCORE_DELTA = 0.05             # post a `rescored` job when a score moves this much
 
-# Planner / crawler
+# Planner / crawler / search
+RECENT_DAYS = 30                 # only pages visited this recently (and pages one link away) count
 MAX_BUDGET = 500                 # budget = MAX_BUDGET * revisit
 HOP_DECAY = 0.7
 MIN_PRIORITY = 0.05

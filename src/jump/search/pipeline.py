@@ -23,9 +23,9 @@ def search(conn: sqlite3.Connection, query: str, use_jev: bool = True, api_key: 
         probs = jev.rank(query, cands, key, client=client)
     order = list(range(len(cands)))
     if probs:
-        # pages you've opened before count extra; hide anything Jev considers unlikely
-        order = sorted((i for i in order if probs[i] >= MIN_PROBABILITY),
-                       key=lambda i: -probs[i] * (1 + cands[i]["picks"]))   # stable: ties keep retriever order
+        # pages you've opened before count extra, then hide anything still unlikely
+        score = [p * (1 + c["picks"]) for p, c in zip(probs, cands)]
+        order = sorted((i for i in order if score[i] >= MIN_PROBABILITY), key=lambda i: -score[i])  # stable
     return [{"page_id": cands[i]["page_id"], "url": cands[i]["url"], "label": cands[i]["label"],
              "kind": cands[i]["kind"], "probability": probs[i] if probs else None}
             for i in order[:config.RESULTS]]

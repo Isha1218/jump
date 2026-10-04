@@ -1,4 +1,4 @@
-"""Crawler agent: drains `crawl` jobs, best-first crawling each place within its budget."""
+"""Crawler agent: drains `crawl` jobs. Fetches pages you visited recently and the pages one link away from them."""
 import sqlite3
 import time
 
@@ -34,7 +34,8 @@ def run_pending(conn: sqlite3.Connection, max_jobs: int | None = None, fetch=Non
 
 
 def crawl_place(conn: sqlite3.Connection, place_id: int, budget: int, fetch=None, delay: float | None = None) -> dict:
-    """Best-first crawl of one place. Returns {fetched, discovered, stopped_reason}."""
+    """Crawl one place: recently visited pages (to read their links) plus pages one link away, best first.
+    Returns {fetched, discovered, stopped_reason}."""
     place = conn.execute("SELECT * FROM places WHERE id = ?", (place_id,)).fetchone()
     if place is None:
         raise ValueError(f"no place {place_id}")
@@ -43,8 +44,10 @@ def crawl_place(conn: sqlite3.Connection, place_id: int, budget: int, fetch=None
     fetch = fetch or fetch_mod.fetch
     delay = config.CRAWL_DELAY_S if delay is None else delay
 
-    visited = conn.execute("SELECT url, revisit FROM pages WHERE place_id = ? AND visited = 1 ORDER BY revisit DESC",
-                           (place_id,)).fetchall()
+    since = time.time() - config.RECENT_DAYS * 86400 if config.RECENT_DAYS else 0
+    visited = conn.execute(
+        "SELECT url, revisit FROM pages WHERE place_id = ? AND visited = 1 AND COALESCE(last_visit, 0) >= ? "
+        "ORDER BY revisit DESC", (place_id, since)).fetchall()
     pattern = Patterns([v["url"] for v in visited])
 
     def fetchable(url: str) -> bool:
@@ -52,10 +55,10 @@ def crawl_place(conn: sqlite3.Connection, place_id: int, budget: int, fetch=None
                 and urls.kind_from_url(url) == "html" and robots.allowed(url))
 
     frontier = Frontier()
-    seeds = [(v["url"], v["revisit"] or place["revisit"]) for v in visited] or [(origin + prefix, place["revisit"])]
-    for url, prio in seeds:
-        if fetchable(url):
-            frontier.add_seed(url, prio)
+    seeds = {v["url"] for v in visited}
+    for v in visited:
+        if fetchable(v["url"]):
+            frontier.add_seed(v["url"], v["revisit"] or place["revisit"])
 
     fetched = discovered = 0
     last_request = 0.0
@@ -76,14 +79,16 @@ def crawl_place(conn: sqlite3.Connection, place_id: int, budget: int, fetch=None
         res = fetch(url)
         last_request = time.monotonic()
         fetched += 1
-        discovered += _record(conn, place_id, url, res, prio, frontier, fetchable, pattern, origin, prefix)
+        # only pages you visited lead further; pages one link away are fetched for their own text only
+        discovered += _record(conn, place_id, url, res, prio, frontier, fetchable, pattern, origin, prefix,
+                              follow_links=url in seeds)
 
     conn.execute("UPDATE places SET last_crawled = ? WHERE id = ?", (time.time(), place_id))
     return {"fetched": fetched, "discovered": discovered, "stopped_reason": reason}
 
 
-def _record(conn, place_id, url, res, prio, frontier, fetchable, pattern, origin, prefix) -> int:
-    """Write one fetched page and its outgoing links (one transaction); feed new links to the frontier."""
+def _record(conn, place_id, url, res, prio, frontier, fetchable, pattern, origin, prefix, follow_links=True) -> int:
+    """Write one fetched page and (if `follow_links`) its outgoing links in one transaction; feed them to the frontier."""
     final = res.final_url or url
     if final != url:
         frontier.mark_done(final)
@@ -91,7 +96,7 @@ def _record(conn, place_id, url, res, prio, frontier, fetchable, pattern, origin
     now = time.time()
     new = 0
     links = []  # (target, anchor, context, in_scope, fetchable) -- robots lookups happen outside the transaction
-    for t, a, c in (page.links if page else []):
+    for t, a, c in (page.links if page and follow_links else []):
         if t not in (url, final):
             inside = urls.in_scope(t, origin, prefix)
             links.append((t, a, c, inside, inside and fetchable(t)))

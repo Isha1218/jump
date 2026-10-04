@@ -57,12 +57,12 @@ def test_course_site(conn):
     assert order.index(C + "lectures/l05.html") < order.index(C + "staff.html")
     assert res["fetched"] == len(COURSE)
 
-    # nav links: on every fetched page -> rarity ends near 0; l05 is linked from few pages
-    n_pages = len(COURSE)
+    # links are only read from the 3 visited pages: nav links are on all of them -> rarity ~0
+    n_pages = len(visited)
     def linking(url):
         return conn.execute("SELECT COUNT(*) FROM links WHERE to_id = ?", (db.page_id(conn, url),)).fetchone()[0]
-    assert rarity(n_pages, linking(C + "staff.html")) < 0.2
-    assert rarity(n_pages, linking(C)) < 0.2
+    assert rarity(n_pages, linking(C + "staff.html")) < 0.25
+    assert rarity(n_pages, linking(C + "syllabus.html")) < 0.25
     assert rarity(n_pages, linking(C + "lectures/l05.html")) > 0.5
 
     pdf = row(conn, C + "lectures/l05.pdf")
@@ -75,17 +75,31 @@ def test_course_site(conn):
 
     l05 = row(conn, C + "lectures/l05.html")
     assert l05["title"] == "Lecture 5" and l05["fetch_status"] == 200 and l05["kind"] == "html"
+    # l05 is one link away: fetched for its text, but its own links are not followed or saved
+    assert conn.execute("SELECT COUNT(*) FROM links WHERE from_id = ?", (l05["id"],)).fetchone()[0] == 0
     assert "Notes for lecture 5" in l05["snippet"] and l05["place_id"] == pid
     l03 = row(conn, C + "lectures/l03.html")
     assert l03["visited"] == 1 and l03["revisit"] == 0.9 and l03["crawled_at"]   # watcher columns untouched
     assert conn.execute("SELECT last_crawled FROM places WHERE id = ?", (pid,)).fetchone()[0]
 
 
-def test_seeds_place_root_without_visited_pages(conn):
+def test_nothing_crawled_without_visited_pages(conn):
     pid = make_place(conn)
     f = FakeFetch(COURSE)
-    crawler.crawl_place(conn, pid, budget=1, fetch=f, delay=0)
-    assert f.pages_fetched == [C]
+    res = crawler.crawl_place(conn, pid, budget=10, fetch=f, delay=0)
+    assert f.pages_fetched == [] and res["stopped_reason"] == "frontier_empty"
+
+
+def test_only_recent_visits_are_crawled(conn, monkeypatch):
+    import time
+    monkeypatch.setattr(config, "RECENT_DAYS", 30)
+    pid = make_place(conn)
+    db.upsert_page(conn, C + "lectures/l03.html", place_id=pid, visited=1, revisit=0.9, last_visit=time.time())
+    db.upsert_page(conn, C + "lectures/l04.html", place_id=pid, visited=1, revisit=0.9,
+                   last_visit=time.time() - 60 * 86400)
+    f = FakeFetch(COURSE)
+    crawler.crawl_place(conn, pid, budget=10, fetch=f, delay=0)
+    assert f.pages_fetched[0] == C + "lectures/l03.html" and C + "lectures/l05.html" not in f.pages_fetched
 
 
 def test_budget_on_open_ended_site(conn):
@@ -96,25 +110,22 @@ def test_budget_on_open_ended_site(conn):
             return "<html><body>" + "".join(f'<a href="{n + k}.html">p{n + k}</a>' for k in range(1, 6)) + "</body></html>"
     pid = make_place(conn, prefix="/gen/", visited=[(g + "1.html", 0.8)])
     f = FakeFetch({}, fallback=gen)
-    res = crawler.crawl_place(conn, pid, budget=25, fetch=f, delay=0)
+    res = crawler.crawl_place(conn, pid, budget=3, fetch=f, delay=0)
     assert res["stopped_reason"] == "budget"
-    assert res["fetched"] == 25 == len(f.pages_fetched)
+    assert res["fetched"] == 3 == len(f.pages_fetched)
 
 
-def test_low_priority_on_deep_chain(conn):
+def test_stops_one_link_away_on_a_deep_chain(conn):
     pages = {}
     url = O + "/d/"
     for i in range(30):
         nxt = f"{url}x{chr(97 + i)}/"
         pages[url] = f'<a href="{nxt}">deeper</a>'
         url = nxt
-    pid = make_place(conn, prefix="/d/", revisit=0.8)
+    pid = make_place(conn, prefix="/d/", revisit=0.8, visited=[(O + "/d/", 0.8)])
     f = FakeFetch(pages)
     res = crawler.crawl_place(conn, pid, budget=100, fetch=f, delay=0)
-    assert res["stopped_reason"] == "low_priority"
-    # 0.8 · 0.7^k < MIN_PRIORITY  ->  k = 8 hops are fetched, the 9th is not
-    k = next(k for k in range(100) if 0.8 * config.HOP_DECAY ** k < config.MIN_PRIORITY)
-    assert res["fetched"] == k
+    assert f.pages_fetched == [O + "/d/", O + "/d/xa/"] and res["stopped_reason"] == "frontier_empty"
 
 
 def test_robots_and_action_urls(conn):
@@ -125,7 +136,7 @@ def test_robots_and_action_urls(conn):
         C + "private/grades.html": "<p>secret</p>",
         C + "logout": "<p>bye</p>",
     }
-    pid = make_place(conn)
+    pid = make_place(conn, visited=[(C, 0.9)])
     f = FakeFetch(pages)
     res = crawler.crawl_place(conn, pid, budget=10, fetch=f, delay=0)
     assert f.pages_fetched == [C, C + "ok.html"]
@@ -140,7 +151,7 @@ def test_records_fetch_status_and_non_html(conn):
         C: '<a href="gone.html">gone</a> <a href="doc">doc</a>',
         C + "doc": FetchResult(200, "application/pdf", C + "doc", None),
     }
-    pid = make_place(conn)
+    pid = make_place(conn, visited=[(C, 0.9)])
     crawler.crawl_place(conn, pid, budget=10, fetch=FakeFetch(pages), delay=0)
     assert row(conn, C + "gone.html")["fetch_status"] == 404
     doc = row(conn, C + "doc")
@@ -150,13 +161,13 @@ def test_records_fetch_status_and_non_html(conn):
 def test_delay_between_requests(conn, monkeypatch):
     sleeps = []
     monkeypatch.setattr(crawler.time, "sleep", sleeps.append)
-    pid = make_place(conn)
+    pid = make_place(conn, visited=[(C, 0.9)])
     crawler.crawl_place(conn, pid, budget=3, fetch=FakeFetch(COURSE), delay=5)
     assert len(sleeps) == 2 and all(0 < s <= 5 for s in sleeps)
 
 
 def test_run_pending(conn):
-    good = make_place(conn)
+    good = make_place(conn, visited=[(C, 0.9)])
     jobs.post(conn, "crawl", {"place_id": good, "budget": 2}, dedupe_key=str(good))
     jobs.post(conn, "crawl", {"place_id": 999, "budget": 2}, dedupe_key="999")
     jobs.post(conn, "crawl", {"place_id": good, "budget": 2})

@@ -150,3 +150,20 @@ def test_lookalike_pages_collapse_to_one_candidate(conn):
     urls_ = [r["url"] for r in retriever.retrieve(conn, "ed cse 123 26au")]
     assert "https://edstem.org/us/courses/106640/discussion" in urls_
     assert sum("/discussion/" in u for u in urls_) == 1          # 8 threads -> one candidate
+
+
+def test_only_recent_pages_and_one_hop_neighbors(conn, monkeypatch):
+    import time
+    from jump import config, db
+    monkeypatch.setattr(config, "RECENT_DAYS", 30)
+    now, old = time.time(), time.time() - 60 * 86400
+    pid = db.upsert_place(conn, "https://x.edu", "/c/", status="active", revisit=0.9)
+    recent = db.upsert_page(conn, "https://x.edu/c/home", place_id=pid, visited=1, last_visit=now, title="rpc home")
+    stale = db.upsert_page(conn, "https://x.edu/c/old", place_id=pid, visited=1, last_visit=old, title="rpc old")
+    near = db.upsert_page(conn, "https://x.edu/c/l05.pdf", place_id=pid, kind="pdf")
+    far = db.upsert_page(conn, "https://x.edu/c/deep", place_id=pid, title="rpc deep")
+    db.add_link(conn, recent, near, "rpc slides")
+    db.add_link(conn, near, far, "rpc deeper")          # two links away from a visited page
+    db.add_link(conn, stale, far, "rpc again")          # linked only from a stale visit
+    got = {r["page_id"] for r in retriever.retrieve(conn, "rpc")}
+    assert got == {recent, near}
