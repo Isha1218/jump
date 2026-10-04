@@ -32,6 +32,7 @@ def test_names_active_pages_and_search_shows_the_name(conn):
     assert s == {"named": 2, "failed": 0}                     # dropped place's page is skipped
     prompt = seen[0]["contents"][0]["parts"][0]["text"]
     assert "no pronouns" in prompt and "Your Orders" in prompt and "past 3 months" in prompt
+    assert "URL path" in prompt and "terms" in prompt          # tell lookalikes apart, keep identifiers
     name = conn.execute("SELECT name FROM pages WHERE url LIKE '%order-history'").fetchone()[0]
     assert name == "Amazon Order History"                     # quotes, period and extra lines stripped
     top = pipeline.search(conn, "amazon order history", use_jev=False)[0]

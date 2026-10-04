@@ -13,9 +13,13 @@ BATCH = 50               # pages named per run
 MAX_CHARS = 80
 DELAY_S = 4.0            # Gemini free tier allows 15 requests/minute
 
-PROMPT = """Write a short, clear name for this web page: the site plus what the page is.
-Rules: at most 8 words; no pronouns (no "your", "my", "our"); don't describe the page's purpose for a tool \
-or list; no quotes or trailing punctuation. Reply with the name only.
+PROMPT = """Write a short, clear name for this web page: the site, then which part of the site it is.
+Use the URL path to tell similar pages apart (e.g. a course's home vs its discussion board vs one thread; \
+an inbox vs one email; a profile vs its settings). For a single item (a thread, email, document, product), \
+include its topic. Keep identifiers that tell things apart: course codes, terms (e.g. 26au), usernames, \
+repo names.
+Rules: at most 8 words; no pronouns (no "your", "my", "our"); ignore unread counts like "(886)"; \
+don't describe the page's purpose for a tool or list; no quotes or trailing punctuation. Reply with the name only.
 
 URL: {url}
 Tab title: {title}
