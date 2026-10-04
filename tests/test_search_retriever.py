@@ -167,3 +167,13 @@ def test_only_recent_pages_and_one_hop_neighbors(conn, monkeypatch):
     db.add_link(conn, stale, far, "rpc again")          # linked only from a stale visit
     got = {r["page_id"] for r in retriever.retrieve(conn, "rpc")}
     assert got == {recent, near}
+
+
+def test_description_has_host_and_untitled_pages_use_first_heading(conn):
+    from jump import db
+    pid = db.upsert_place(conn, "https://canvas.uw.edu", "/courses/", status="active", revisit=0.7, alias="courses")
+    db.upsert_page(conn, "https://canvas.uw.edu/courses/1916633", place_id=pid, visited=1,
+                   headings=["CSE M 553 A Au 26: Datacenter Systems", "Course Summary:"], snippet="Syllabus")
+    r = retriever.retrieve(conn, "canvas datacenter")[0]
+    assert r["label"] == "CSE M 553 A Au 26: Datacenter Systems"          # not "1916633"
+    assert "canvas.uw.edu/courses/1916633" in r["description"]           # Jev can see it's Canvas

@@ -113,7 +113,8 @@ def alias_places(conn: sqlite3.Connection, query: str) -> list[int]:
 
 
 def label_for(page, anchors: list[str], contexts: list[str]) -> str:
-    """Human label: best anchor, else '<context> — <generic anchor>', else title, else last path segment."""
+    """Human label: best anchor, else '<context> — <generic anchor>', else title, else first heading,
+    else last path segment."""
     for a in anchors:
         if not GENERIC_ANCHOR.match(a):
             return a[:120]
@@ -121,16 +122,20 @@ def label_for(page, anchors: list[str], contexts: list[str]) -> str:
         return f"{contexts[0][:100]} — {anchors[0]}"
     if page["title"]:
         return " ".join(page["title"].split())[:120]
+    headings = _headings(page["headings"]) if "headings" in page.keys() else []
+    if headings:
+        return " ".join(headings[0].split())[:120]
     segs = urls.path_segments(page["url"])
     return unquote(segs[-1]) if segs else (urlsplit(page["url"]).hostname or page["url"])
 
 
 def description_for(page, label: str, site: str, anchors: list[str], contexts: list[str]) -> str:
-    """One line for Jev: label | site › path | kind | context or snippet excerpt."""
-    path = unquote(urlsplit(page["url"]).path) or "/"
+    """One line for Jev: label | site › host/path (e.g. canvas.uw.edu/courses/1916633) | kind | excerpt."""
+    u = urlsplit(page["url"])
+    where = (u.hostname or "").removeprefix("www.") + (unquote(u.path) or "/")
     extra = [c for c in contexts if c not in label] + anchors[1:3]
     excerpt = " · ".join(extra) or " ".join((page["snippet"] or "").split())
-    return f"{label} | {site} › {path} | {page['kind']} | {excerpt}"[:DESCRIPTION_CHARS]
+    return f"{label} | {site} › {where} | {page['kind']} | {excerpt}"[:DESCRIPTION_CHARS]
 
 
 def _url_key(url: str) -> str:
@@ -156,7 +161,7 @@ def retrieve(conn: sqlite3.Connection, query: str, k: int = CANDIDATES) -> list[
     sql = f"""
     WITH m AS MATERIALIZED (SELECT rowid AS id, -bm25(pages_fts, {weights}) AS rel FROM pages_fts WHERE pages_fts MATCH ?),
     s AS (
-      SELECT p.id, p.url, p.kind, p.name, p.title, p.snippet, m.rel + {COVERAGE} * ({covered}) AS rel,
+      SELECT p.id, p.url, p.kind, p.name, p.title, p.headings, p.snippet, m.rel + {COVERAGE} * ({covered}) AS rel,
         MAX(p.revisit, COALESCE(pl.revisit, (SELECT MAX(lp.revisit) FROM links l JOIN pages f ON f.id = l.from_id
                                              JOIN places lp ON lp.id = f.place_id WHERE l.to_id = p.id), 0)) AS rv,
         (SELECT COUNT(*) FROM picks WHERE page_id = p.id) AS npicks,
