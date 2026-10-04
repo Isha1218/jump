@@ -5,10 +5,10 @@ import { homedir } from "os";
 type Result = { page_id: number; url: string; label: string; kind: string; probability: number | null };
 
 export default function Command(props: LaunchProps<{ arguments: Arguments.Jump }>) {
-  const { jumpPath, jevApiKey } = getPreferenceValues<Preferences>();
+  const { jumpPath } = getPreferenceValues<Preferences>();
   const bin = (jumpPath || "~/projects/jump/main/.venv/bin/jump").replace(/^~/, homedir());
+  // API keys are read by the jump CLI from ~/.jump/keys
   const { isLoading, data, error } = useExec(bin, ["search", props.arguments.query, "--json"], {
-    env: { ...process.env, ...(jevApiKey ? { JEV_API_KEY: jevApiKey } : {}) },
     parseOutput: ({ stdout }) => JSON.parse(stdout) as Result[],
   });
 
