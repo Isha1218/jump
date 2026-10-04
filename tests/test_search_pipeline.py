@@ -105,3 +105,14 @@ def test_open_in_browser(monkeypatch):
     monkeypatch.setattr(pipeline.subprocess, "run", missing)
     pipeline.open_in_browser("https://x.edu/a")
     assert calls == [("web", "https://x.edu/a")]
+
+
+def test_a_picked_page_survives_the_cutoff(conn):
+    build_graph(conn)
+    cands = retriever.retrieve(conn, "452 rpc lecture")
+    b = cands[1]["page_id"]
+    pipeline.record_pick(conn, "452 rpc lecture", b)
+    cands = retriever.retrieve(conn, "452 rpc lecture")
+    probs = {f"c{i}": (0.09 if c["page_id"] == b else 0.01) for i, c in enumerate(cands)}
+    res = pipeline.search(conn, "452 rpc lecture", api_key="k", client=_jev(probs))
+    assert [r["page_id"] for r in res] == [b]          # 0.09 × (1 + 1 pick) = 0.18 ≥ 0.1

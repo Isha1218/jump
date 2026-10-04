@@ -2,9 +2,11 @@
 import json
 import re
 import sqlite3
+import time
 from urllib.parse import unquote, urlsplit
 
 from .. import urls
+from .. import config
 from ..config import CANDIDATES
 from .text import normalize_text, query_terms, tokens
 
@@ -136,6 +138,12 @@ def _url_key(url: str) -> str:
     return urls.url_template(url).removeprefix("www.")
 
 
+# Only pages visited recently, or never-opened pages one link away from one.
+RECENT_FILTER = """WHERE (p.visited = 1 AND p.last_visit >= ?) OR (p.visited = 0 AND EXISTS (
+        SELECT 1 FROM links l JOIN pages f ON f.id = l.from_id
+        WHERE l.to_id = p.id AND f.visited = 1 AND f.last_visit >= ?))"""
+
+
 def retrieve(conn: sqlite3.Connection, query: str, k: int = CANDIDATES) -> list[dict]:
     """Top-k candidates: dicts with page_id, url, kind, label, description, score."""
     sync_fts(conn)
@@ -156,11 +164,13 @@ def retrieve(conn: sqlite3.Connection, query: str, k: int = CANDIDATES) -> list[
              WHERE l.to_id = p.id AND f.place_id IN ({scoped})) THEN {ALIAS_BOOST} ELSE 1.0 END AS boost,
         COALESCE(pl.alias, pl.origin) AS site
       FROM m JOIN pages p ON p.id = m.id LEFT JOIN places pl ON pl.id = p.place_id
+      {RECENT_FILTER if config.RECENT_DAYS else ""}
     )
     SELECT *, rel * (0.5 + rv) * (1 + npicks) * boost AS score FROM s ORDER BY score DESC LIMIT ?
     """
     try:
-        rows = conn.execute(sql, (" OR ".join(groups), *groups, 2 * k)).fetchall()
+        recent = [time.time() - config.RECENT_DAYS * 86400] * 2 if config.RECENT_DAYS else []
+        rows = conn.execute(sql, (" OR ".join(groups), *groups, *recent, 2 * k)).fetchall()
     except sqlite3.OperationalError:     # defensive: a MATCH string FTS5 still rejects
         return []
     seen, picked = set(), []
