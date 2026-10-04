@@ -137,3 +137,16 @@ def test_alias_scoping(conn):
     assert retriever.alias_places(conn, "CSE 452") == [1]
     assert retriever.alias_places(conn, "cse lecture") == []       # 'cse' is shared by many aliases
     assert retriever.alias_places(conn, "stripe webhooks") == [3]
+
+
+def test_lookalike_pages_collapse_to_one_candidate(conn):
+    from jump import db
+    pid = db.upsert_place(conn, "https://edstem.org", "/us/courses/106640/", status="active", revisit=0.8, alias="ed")
+    db.upsert_page(conn, "https://edstem.org/us/courses/106640/discussion", place_id=pid, visited=1,
+                   title="CSE 123 - 26au – Ed Discussion")
+    for t in range(8):
+        db.upsert_page(conn, f"https://edstem.org/us/courses/106640/discussion/83{t}0682", place_id=pid, visited=1,
+                       title=f"Thread {t} – CSE 123 - 26au – Ed Discussion")
+    urls_ = [r["url"] for r in retriever.retrieve(conn, "ed cse 123 26au")]
+    assert "https://edstem.org/us/courses/106640/discussion" in urls_
+    assert sum("/discussion/" in u for u in urls_) == 1          # 8 threads -> one candidate

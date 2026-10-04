@@ -13,3 +13,12 @@ def test_search_json(tmp_path, capsys):
     results = json.loads(capsys.readouterr().out)
     assert results[0]["url"] == "https://www.amazon.com/gp/css/order-history"
     assert results[0]["label"] == "Your Orders" and results[0]["probability"] is None
+
+
+def test_pick_records_an_opened_result(tmp_path):
+    path = tmp_path / "g.db"
+    conn = db.connect(path)
+    page = db.upsert_page(conn, "https://github.com/Isha1218", title="Isha1218")
+    cli.main(["--db", str(path), "pick", str(page), "--query", "github profile"])
+    row = conn.execute("SELECT query, page_id FROM picks").fetchone()
+    assert (row["query"], row["page_id"]) == ("github profile", page)

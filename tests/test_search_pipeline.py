@@ -31,11 +31,32 @@ def test_jev_reorders(conn):
                                                                "probabilities": {f"c{want}": 0.9, "c0": 0.05}}}})
 
     res = pipeline.search(conn, "452 rpc lecture", api_key="k", client=mock(handler))
-    assert res[0]["page_id"] == g["dropped"] and res[0]["probability"] == 0.9
-    assert res[1]["page_id"] == cands[0]["page_id"] and res[1]["probability"] == 0.05
-    assert [r["page_id"] for r in res[2:]] == [c["page_id"] for c in cands if c["page_id"] not in
-                                               (g["dropped"], cands[0]["page_id"])][:3]   # ties keep retriever order
+    assert [(r["page_id"], r["probability"]) for r in res] == [(g["dropped"], 0.9)]   # < 0.1 hidden
     assert len(sent["body"]["questions"]["page"]["criteria"]) == len(cands)
+
+
+def _jev(probs: dict):
+    def handler(req):
+        return httpx.Response(200, json={"answers": {"page": {"type": "choice", "probabilities": probs}}})
+    return mock(handler)
+
+
+def test_nothing_shown_when_jev_is_unsure_about_everything(conn):
+    build_graph(conn)
+    n = len(retriever.retrieve(conn, "452 rpc lecture"))
+    assert pipeline.search(conn, "452 rpc lecture", api_key="k", client=_jev({f"c{i}": 0.05 for i in range(n)})) == []
+
+
+def test_opened_pages_rank_higher(conn):
+    build_graph(conn)
+    cands = retriever.retrieve(conn, "452 rpc lecture")
+    a, b = cands[0]["page_id"], cands[1]["page_id"]
+    probs = {"c0": 0.4, "c1": 0.3}
+    assert pipeline.search(conn, "452 rpc lecture", api_key="k", client=_jev(probs))[0]["page_id"] == a
+    pipeline.record_pick(conn, "452 rpc lecture", b)
+    cands = retriever.retrieve(conn, "452 rpc lecture")
+    probs = {f"c{i}": {a: 0.4, b: 0.3}.get(c["page_id"], 0) for i, c in enumerate(cands)}
+    assert pipeline.search(conn, "452 rpc lecture", api_key="k", client=_jev(probs))[0]["page_id"] == b
 
 
 def test_jev_failure_falls_back(conn):
