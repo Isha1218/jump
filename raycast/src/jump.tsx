@@ -5,6 +5,14 @@ import { homedir } from "os";
 
 type Result = { page_id: number; url: string; label: string; kind: string; probability: number | null };
 
+// "edstem.org/us/courses/106640/discussion": enough to tell similar names apart
+function shortUrl(url: string): string {
+  const u = new URL(url);
+  const path = u.pathname.replace(/\/$/, "");
+  const full = u.hostname.replace(/^www\./, "") + path;
+  return full.length > 60 ? full.slice(0, 57) + "…" : full;
+}
+
 export default function Command(props: LaunchProps<{ arguments: Arguments.Jump }>) {
   const { jumpPath } = getPreferenceValues<Preferences>();
   const bin = (jumpPath || "~/projects/jump/main/.venv/bin/jump").replace(/^~/, homedir());
@@ -27,7 +35,7 @@ export default function Command(props: LaunchProps<{ arguments: Arguments.Jump }
         <List.Item
           key={r.url}
           title={r.label}
-          subtitle={new URL(r.url).hostname}
+          subtitle={shortUrl(r.url)}
           accessories={r.probability === null ? [] : [{ text: r.probability.toFixed(2) }]}
           actions={
             <ActionPanel>
