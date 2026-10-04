@@ -9,10 +9,8 @@ from statistics import mean, pstdev
 
 from . import config
 
-WEIGHTS = {"bias": -3.0, "days": 1.5, "typed": 1.0, "breadth": 0.5, "bounce": -1.0, "regular": 0.5}
+WEIGHTS = {"bias": -3.0, "days": 1.5, "breadth": 0.5, "bounce": -1.0, "regular": 0.5}
 LOG_TERMS = {"days", "breadth"}
-TYPED = {1, 2}       # TYPED, AUTO_BOOKMARK
-RELOAD = 8
 
 
 def day_of(ts: float) -> date:
@@ -22,20 +20,19 @@ def day_of(ts: float) -> date:
 def features(visits: Iterable[dict], now: float, half_life: float,
              inside: Callable[[str], bool] | None = None,
              from_hub: Callable[[str], bool] | None = None) -> dict:
-    """Score inputs for a set of visits (dicts with url, ts, transition, duration_s, from_url).
+    """Score inputs for a set of visits (dicts with url, ts, duration_s, from_url).
 
-    Arrivals are non-reload visits not coming from inside the same place (`inside(from_url)`).
+    Arrivals are visits not coming from inside the same place (`inside(from_url)`).
     """
     visits = list(visits)
     today = day_of(now)
     days = sorted({day_of(v["ts"]) for v in visits})
-    arrivals = [v for v in visits if v["transition"] != RELOAD and not (inside and v["from_url"] and inside(v["from_url"]))]
+    arrivals = [v for v in visits if not (inside and v["from_url"] and inside(v["from_url"]))]
     gaps = [(b - a).days for a, b in zip(days, days[1:])]
     return {
         "visits": len(visits),
         "n_days": len(days),
         "days": round(sum(0.5 ** (max(0, (today - d).days) / half_life) for d in days), 4),
-        "typed": round(sum(v["transition"] in TYPED for v in arrivals) / len(arrivals), 4) if arrivals else 0.0,
         "breadth": len({v["url"] for v in visits}),
         "bounce": round(sum(0 < v["duration_s"] < config.BOUNCE_SECONDS for v in visits) / len(visits), 4)
         if visits else 0.0,

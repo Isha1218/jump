@@ -44,7 +44,7 @@ def run_once(conn: sqlite3.Connection, now: float | None = None) -> dict:
 
 def _run(conn: sqlite3.Connection, now: float) -> dict:
     visits = [dict(r) for r in conn.execute(
-        "SELECT url, ts, transition, duration_s, from_url FROM visits WHERE ts >= ?",
+        "SELECT url, ts, duration_s, from_url FROM visits WHERE ts >= ?",
         (now - config.HISTORY_WINDOW_DAYS * 86400,))]
     hubs = places.find_hubs(visits)
 

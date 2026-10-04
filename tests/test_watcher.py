@@ -16,9 +16,9 @@ class Visits:
     def __init__(self, conn):
         self.conn = conn
 
-    def visit(self, url, ts, transition=0, duration_s=60, from_url=None, title=None):
-        self.conn.execute("INSERT INTO visits(url, ts, transition, duration_s, from_url) VALUES (?, ?, ?, ?, ?)",
-                          (url, ts, transition, duration_s, from_url))
+    def visit(self, url, ts, duration_s=60, from_url=None, title=None):
+        self.conn.execute("INSERT INTO visits(url, ts, duration_s, from_url) VALUES (?, ?, ?, ?)",
+                          (url, ts, duration_s, from_url))
         if title:
             self.conn.execute("INSERT INTO pages(url, title) VALUES (?, ?) ON CONFLICT(url) DO NOTHING", (url, title))
         return url
@@ -28,12 +28,12 @@ class Visits:
 def hist(conn):
     h = Visits(conn)
     for k, d in enumerate(range(0, 16, 2)):                          # a course, visited every other day
-        home = h.visit(COURSE, NOW - d * DAY, transition=1, title="CSE 452")
+        home = h.visit(COURSE, NOW - d * DAY, title="CSE 452")
         for j in range(3):
             h.visit(f"{COURSE}lectures/l{(k * 3 + j) % 20:02d}.html", NOW - d * DAY + 60 * (j + 1),
                     from_url=home, title=f"Lecture {j}")
     for i, site in enumerate(["https://a.com/x", "https://b.org/y", "https://c.net/z"]):  # searching around
-        s = h.visit(f"https://search.example/s?q=thing{i}", NOW - i * DAY - 3600, transition=1)
+        s = h.visit(f"https://search.example/s?q=thing{i}", NOW - i * DAY - 3600)
         h.visit(site, NOW - i * DAY - 3500, from_url=s, duration_s=3)
     return h
 
@@ -52,7 +52,7 @@ def test_run_once_builds_places_hubs_and_pages(conn, hist):
     assert s["visits"] == 38 and s["hubs"] == 1 and s["active"] == 1
     got = _places(conn)
     course = got[COURSE]
-    assert course["status"] == "active" and course["revisit"] > 0.9 and course["alias"] == "cse452"
+    assert course["status"] == "active" and course["revisit"] > 0.85 and course["alias"] == "cse452"
     assert json.loads(course["features"])["n_days"] == 8
     assert got["https://search.example/"]["status"] == "hub"
     assert got["https://a.com/"]["status"] == "dropped"
@@ -81,7 +81,7 @@ def test_rescore_only_on_meaningful_change(conn, hist):
     conn.execute("UPDATE jobs SET status = 'done'")
     before = _places(conn)["https://b.org/"]["revisit"]
     for d in range(1, 6):                                           # b.org becomes a habit
-        hist.visit("https://b.org/y", NOW + d * DAY, transition=1, duration_s=300)
+        hist.visit("https://b.org/y", NOW + d * DAY, duration_s=300)
     s = watcher.run_once(conn, NOW + 5 * DAY)
     after = _places(conn)["https://b.org/"]
     assert after["revisit"] > before + 0.05
@@ -92,7 +92,7 @@ def test_rescore_only_on_meaningful_change(conn, hist):
 def test_probation_expires(conn):
     h = Visits(conn)
     for d in (0, 1):
-        h.visit("https://wiki.example.com/team/page", NOW - d * DAY, transition=1, duration_s=120)
+        h.visit("https://wiki.example.com/team/page", NOW - d * DAY, duration_s=120)
     watcher.run_once(conn, NOW)
     assert _places(conn)["https://wiki.example.com/team/"]["status"] == "probation"
     watcher.run_once(conn, NOW + 20 * DAY)

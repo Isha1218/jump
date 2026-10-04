@@ -7,22 +7,21 @@ DAY = 86400
 BASE = "https://x.edu/c/452/"
 
 
-def v(url, days_ago, transition=0, duration=60, from_url=None):
-    return {"url": url, "ts": NOW - days_ago * DAY, "transition": transition, "duration_s": duration,
-            "from_url": from_url}
+def v(url, days_ago, duration=60, from_url=None):
+    return {"url": url, "ts": NOW - days_ago * DAY, "duration_s": duration, "from_url": from_url}
 
 
 def test_course_like_place_scores_high():
     visits = []
     for k, d in enumerate(range(0, 16, 2)):                     # 8 days, every 2 days
-        visits.append(v(BASE, d, transition=1))                  # typed arrival
+        visits.append(v(BASE, d))
         for j in range(4):
             page = f"{BASE}lec/l{(k * 4 + j) % 30:02d}.html"
             visits.append(v(page, d, from_url=BASE, duration=5 if j == 0 and k % 3 == 0 else 120))
     feats, score = scoring.score_place(visits, NOW, inside=lambda u: u.startswith(BASE))
-    assert feats["n_days"] == 8 and feats["typed"] == 1.0 and feats["regular"] == 1.0
+    assert feats["n_days"] == 8 and feats["regular"] == 1.0
     assert feats["breadth"] >= 29 and feats["bounce"] < 0.1
-    assert score > 0.9
+    assert score > 0.85
 
 
 def test_single_bounce_from_search_scores_low():
@@ -34,12 +33,11 @@ def test_single_bounce_from_search_scores_low():
 
 
 def test_feature_details():
-    visits = [v(BASE, 14, duration=0), v(BASE, 14, transition=8, duration=2), v(BASE + "a", 0, transition=2)]
+    visits = [v(BASE, 14, duration=0), v(BASE, 14, duration=2), v(BASE + "a", 0)]
     f, s = scoring.score_place(visits, NOW)
     assert f["days"] == 1.5                                       # 1 (today) + 0.5 (one half-life ago)
-    assert f["typed"] == 0.5                                      # reload excluded from arrivals
     assert math.isclose(f["bounce"], 1 / 3, abs_tol=1e-3)         # duration 0 is unknown, not a bounce
-    x = -3 + 1.5 * math.log(2.5) + 0.5 - 1 / 3 + 0.5 * math.log(3)
+    x = -3 + 1.5 * math.log(2.5) - 1 / 3 + 0.5 * math.log(3)
     assert math.isclose(s, 1 / (1 + math.exp(-x)), abs_tol=1e-3)
 
 
