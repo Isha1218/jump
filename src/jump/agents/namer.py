@@ -1,6 +1,7 @@
 """Namer agent: gives pages a short, clear name for the result list (Gemini), instead of the raw tab title."""
 import re
 import sqlite3
+import time
 
 import httpx
 
@@ -10,6 +11,7 @@ MODEL = "gemini-flash-lite-latest"
 URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
 BATCH = 50               # pages named per run
 MAX_CHARS = 80
+DELAY_S = 4.0            # Gemini free tier allows 15 requests/minute
 
 PROMPT = """Write a short, clear name for this web page: the site plus what the page is.
 Rules: at most 8 words; no pronouns (no "your", "my", "our"); don't describe the page's purpose for a tool \
@@ -40,7 +42,7 @@ def name_page(page, api_key: str, client: httpx.Client) -> str | None:
 
 
 def run_once(conn: sqlite3.Connection, api_key: str | None = None, limit: int = BATCH,
-             client: httpx.Client | None = None) -> dict:
+             client: httpx.Client | None = None, delay: float = DELAY_S) -> dict:
     """Name unnamed visited pages in active places, most-revisited first."""
     api_key = api_key or config.GEMINI_API_KEY
     if not api_key:
@@ -51,7 +53,9 @@ def run_once(conn: sqlite3.Connection, api_key: str | None = None, limit: int = 
         "ORDER BY g.revisit DESC LIMIT ?", (limit,)).fetchall()
     client = client or httpx.Client()
     named = 0
-    for row in rows:
+    for i, row in enumerate(rows):
+        if i:
+            time.sleep(delay)
         name = name_page(row, api_key, client)
         if name:
             db.upsert_page(conn, row["url"], name=name)

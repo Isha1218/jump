@@ -28,7 +28,7 @@ def _gemini(reply="Amazon Order History", status=200, seen=None):
 def test_names_active_pages_and_search_shows_the_name(conn):
     _graph(conn)
     seen = []
-    s = namer.run_once(conn, api_key="k", client=_gemini('"Amazon Order History."\n', seen=seen))
+    s = namer.run_once(conn, api_key="k", delay=0, client=_gemini('"Amazon Order History."\n', seen=seen))
     assert s == {"named": 2, "failed": 0}                     # dropped place's page is skipped
     prompt = seen[0]["contents"][0]["parts"][0]["text"]
     assert "no pronouns" in prompt and "Your Orders" in prompt and "past 3 months" in prompt
@@ -40,21 +40,30 @@ def test_names_active_pages_and_search_shows_the_name(conn):
 
 def test_name_is_searchable(conn):
     _graph(conn)
-    namer.run_once(conn, api_key="k", client=_gemini("Amazon Purchase History"))
+    namer.run_once(conn, api_key="k", delay=0, client=_gemini("Amazon Purchase History"))
     assert any("order-history" in r["url"] for r in pipeline.search(conn, "purchase", use_jev=False))
 
 
 def test_failures_leave_pages_unnamed_for_next_run(conn):
     _graph(conn)
-    assert namer.run_once(conn, api_key="k", client=_gemini(status=503)) == {"named": 0, "failed": 2}
+    assert namer.run_once(conn, api_key="k", delay=0, client=_gemini(status=503)) == {"named": 0, "failed": 2}
     assert conn.execute("SELECT COUNT(*) FROM pages WHERE name IS NOT NULL").fetchone()[0] == 0
-    assert namer.run_once(conn, api_key="k", client=_gemini())["named"] == 2
+    assert namer.run_once(conn, api_key="k", delay=0, client=_gemini())["named"] == 2
 
 
 def test_already_named_pages_are_not_renamed(conn):
     _graph(conn)
+    namer.run_once(conn, api_key="k", delay=0, client=_gemini())
+    assert namer.run_once(conn, api_key="k", delay=0, client=_gemini("Something Else")) == {"named": 0, "failed": 0}
+
+
+def test_requests_are_paced_for_the_free_tier(conn, monkeypatch):
+    _graph(conn)
+    sleeps = []
+    monkeypatch.setattr(namer.time, "sleep", sleeps.append)
     namer.run_once(conn, api_key="k", client=_gemini())
-    assert namer.run_once(conn, api_key="k", client=_gemini("Something Else")) == {"named": 0, "failed": 0}
+    assert sleeps == [namer.DELAY_S]                          # 2 pages -> one pause between them
+    assert 60 / namer.DELAY_S <= 15
 
 
 def test_without_key_does_nothing(conn, monkeypatch):
