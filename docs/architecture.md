@@ -49,6 +49,10 @@ Each module owns its tables' writes as listed. Function names below are called b
 - `pipeline.record_pick(conn, query, page_id)`, `pipeline.open_in_browser(url)` (macOS `open -a "Google Chrome"`).
 - Writes: FTS table, `picks`.
 
+### Namer — `jump.agents.namer`
+- `namer.run_once(conn, api_key=None, limit=50, client=None) -> dict` — for unnamed visited pages in active places (most-revisited first), one Gemini `generateContent` call (`gemini-flash-lite-latest`) with URL, tab title, headings and snippet → ≤8-word name, no pronouns → `pages.name`. Errors leave the page unnamed for the next run. Needs `GEMINI_API_KEY`.
+- Search labels use `name` when present; `name` is indexed with the title.
+
 ### Daemon — `jump.daemon`
-- `daemon.run(conn, stop=None, workers=2, cycle_s=300, chrome=None)` — monitor thread; watcher → planner every `cycle_s`; crawler worker threads (own connections) draining `crawl` jobs; stale `running` jobs requeued on start.
+- `daemon.run(conn, stop=None, workers=2, cycle_s=300, chrome=None)` — monitor thread; watcher → planner → namer every `cycle_s`; crawler worker threads (own connections) draining `crawl` jobs; stale `running` jobs requeued on start.
 - `jump.service.install(load=False)` / `uninstall()` — launchd agent (`~/Library/LaunchAgents/com.jump.daemon.plist`): start at login, restart on crash.

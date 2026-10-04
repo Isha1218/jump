@@ -5,6 +5,7 @@ from pathlib import Path
 HOME = Path(os.environ.get("JUMP_HOME", Path.home() / ".jump"))
 DB_PATH = HOME / "graph.db"
 JEV_API_KEY = os.environ.get("JEV_API_KEY")  # optional; search falls back to local ranking
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")  # optional; the Namer agent only runs with it
 
 # Watcher: revisit scoring
 HISTORY_WINDOW_DAYS = 90         # visits older than this are ignored

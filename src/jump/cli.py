@@ -21,6 +21,11 @@ def _crawl(conn, args):
     print(json.dumps(crawler.run_pending(conn, max_jobs=args.max_jobs), indent=2))
 
 
+def _name(conn, args):
+    from .agents import namer
+    print(json.dumps(namer.run_once(conn, limit=args.limit), indent=2))
+
+
 def _places(conn, args):
     rows = conn.execute(
         "SELECT p.scope, p.status, p.revisit, p.budget, COUNT(g.id) AS pages, p.features FROM places p "
@@ -86,6 +91,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("crawl", help="run pending crawl jobs")
     p.add_argument("--max-jobs", type=int, default=None)
     p.set_defaults(fn=_crawl)
+    p = sub.add_parser("name", help="give pages short descriptive names (needs GEMINI_API_KEY)")
+    p.add_argument("--limit", type=int, default=50)
+    p.set_defaults(fn=_name)
     p = sub.add_parser("places", help="list places and their revisit scores")
     p.add_argument("--status", nargs="+", default=["active", "probation"])
     p.add_argument("--limit", type=int, default=30)

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS pages (
   url TEXT UNIQUE NOT NULL,
   place_id INTEGER REFERENCES places(id),
   title TEXT,
+  name TEXT,                           -- short descriptive name written by the Namer agent
   snippet TEXT,                        -- title + headings + first ~300 chars of text
   headings TEXT,                       -- JSON list
   kind TEXT NOT NULL DEFAULT 'html',   -- html | pdf | slides | video | file

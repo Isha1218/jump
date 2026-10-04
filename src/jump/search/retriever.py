@@ -56,14 +56,14 @@ def sync_fts(conn: sqlite3.Connection) -> int:
     if own_tx:
         conn.execute("BEGIN IMMEDIATE")
     try:
-        pages = conn.execute("SELECT id, url, title, snippet, headings FROM pages WHERE fts_dirty = 1").fetchall()
+        pages = conn.execute("SELECT id, url, name, title, snippet, headings FROM pages WHERE fts_dirty = 1").fetchall()
         texts = _link_texts(conn, [p["id"] for p in pages])
         for p in pages:
             anchors, contexts = texts[p["id"]]
             conn.execute("DELETE FROM pages_fts WHERE rowid = ?", (p["id"],))
             conn.execute(
                 "INSERT INTO pages_fts(rowid, title, anchors, contexts, headings, snippet, words) VALUES (?,?,?,?,?,?,?)",
-                (p["id"], normalize_text(p["title"]), normalize_text(" | ".join(anchors)),
+                (p["id"], normalize_text(" | ".join(filter(None, [p["name"], p["title"]]))), normalize_text(" | ".join(anchors)),
                  normalize_text(" | ".join(contexts)), normalize_text(" ".join(_headings(p["headings"]))),
                  normalize_text(p["snippet"]), normalize_text(urls.url_words(p["url"]))),
             )
@@ -148,7 +148,7 @@ def retrieve(conn: sqlite3.Connection, query: str, k: int = CANDIDATES) -> list[
     sql = f"""
     WITH m AS MATERIALIZED (SELECT rowid AS id, -bm25(pages_fts, {weights}) AS rel FROM pages_fts WHERE pages_fts MATCH ?),
     s AS (
-      SELECT p.id, p.url, p.kind, p.title, p.snippet, m.rel + {COVERAGE} * ({covered}) AS rel,
+      SELECT p.id, p.url, p.kind, p.name, p.title, p.snippet, m.rel + {COVERAGE} * ({covered}) AS rel,
         MAX(p.revisit, COALESCE(pl.revisit, (SELECT MAX(lp.revisit) FROM links l JOIN pages f ON f.id = l.from_id
                                              JOIN places lp ON lp.id = f.place_id WHERE l.to_id = p.id), 0)) AS rv,
         (SELECT COUNT(*) FROM picks WHERE page_id = p.id) AS npicks,
@@ -176,7 +176,7 @@ def retrieve(conn: sqlite3.Connection, query: str, k: int = CANDIDATES) -> list[
     out = []
     for r in picked:
         anchors, contexts = texts[r["id"]]
-        label = label_for(r, anchors, contexts)
+        label = r["name"] or label_for(r, anchors, contexts)
         site = r["site"] or sites.get(r["id"]) or urlsplit(r["url"]).hostname or ""
         out.append({"page_id": r["id"], "url": r["url"], "kind": r["kind"], "label": label,
                     "description": description_for(r, label, site, anchors, contexts), "score": r["score"]})
