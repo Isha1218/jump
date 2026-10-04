@@ -4,8 +4,23 @@ from pathlib import Path
 
 HOME = Path(os.environ.get("JUMP_HOME", Path.home() / ".jump"))
 DB_PATH = HOME / "graph.db"
-JEV_API_KEY = os.environ.get("JEV_API_KEY")  # optional; search falls back to local ranking
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")  # optional; the Namer agent only runs with it
+KEYS_FILE = HOME / "keys"        # local `NAME=value` lines; never in the repo
+
+
+def load_keys(path: Path = KEYS_FILE) -> dict[str, str]:
+    keys = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            name, sep, value = line.strip().partition("=")
+            if sep and not name.startswith("#"):
+                keys[name.strip()] = value.strip().strip("'\"")
+    return keys
+
+
+_keys = load_keys()
+# Environment variables win over the keys file.
+JEV_API_KEY = os.environ.get("JEV_API_KEY") or _keys.get("JEV_API_KEY")  # optional; search falls back to local ranking
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or _keys.get("GEMINI_API_KEY")  # optional; Namer runs only with it
 
 # Watcher: revisit scoring
 HISTORY_WINDOW_DAYS = 90         # visits older than this are ignored

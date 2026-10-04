@@ -1,5 +1,4 @@
 """launchd agent so macOS keeps `jump daemon` running (start at login, restart on crash)."""
-import os
 import plistlib
 import shutil
 import subprocess
@@ -23,9 +22,7 @@ def build_plist(jump_bin: str, home: Path = config.HOME) -> dict:
         "KeepAlive": True,
         "StandardOutPath": str(home / "daemon.log"),
         "StandardErrorPath": str(home / "daemon.log"),
-        # launchd doesn't read ~/.zshrc, so carry the API keys into the (local, never committed) plist
-        "EnvironmentVariables": {"JUMP_HOME": str(home), **{k: v for k in ("GEMINI_API_KEY", "JEV_API_KEY")
-                                                            if (v := os.environ.get(k))}},
+        "EnvironmentVariables": {"JUMP_HOME": str(home)},   # API keys come from ~/.jump/keys
     }
 
 

@@ -30,13 +30,6 @@
       "type": "textfield",
       "required": false,
       "default": "~/projects/jump/main/.venv/bin/jump"
-    },
-    {
-      "name": "jevApiKey",
-      "title": "Jev API key",
-      "description": "Optional. Without it, results use local ranking only.",
-      "type": "password",
-      "required": false
     }
   ],
   "scripts": {
