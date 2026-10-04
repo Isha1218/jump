@@ -22,10 +22,10 @@ def db_path(conn: sqlite3.Connection) -> str:
 
 
 def watch_cycle(conn: sqlite3.Connection) -> dict:
-    """One Watcher run followed by one Planner run."""
-    from .agents import planner, watcher
+    """One Watcher run, then the Planner and the Namer."""
+    from .agents import namer, planner, watcher
 
-    return {"watcher": watcher.run_once(conn), "planner": planner.run_once(conn)}
+    return {"watcher": watcher.run_once(conn), "planner": planner.run_once(conn), "namer": namer.run_once(conn)}
 
 
 def crawl_worker(path: str, stop: threading.Event, idle_s: float | None = None) -> None:

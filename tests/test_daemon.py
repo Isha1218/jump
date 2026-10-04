@@ -12,6 +12,8 @@ def _stub_agents(monkeypatch, calls):
     watcher = types.ModuleType("jump.agents.watcher")
     planner = types.ModuleType("jump.agents.planner")
     crawler = types.ModuleType("jump.agents.crawler")
+    namer = types.ModuleType("jump.agents.namer")
+    namer.run_once = lambda conn: {}
 
     def w_run(conn, now=None):
         calls.append("watch")
@@ -30,7 +32,7 @@ def _stub_agents(monkeypatch, calls):
         return {"jobs": int(bool(job))}
 
     watcher.run_once, planner.run_once, crawler.run_pending = w_run, p_run, c_run
-    for name, mod in [("watcher", watcher), ("planner", planner), ("crawler", crawler)]:
+    for name, mod in [("watcher", watcher), ("planner", planner), ("crawler", crawler), ("namer", namer)]:
         monkeypatch.setitem(sys.modules, f"jump.agents.{name}", mod)
         monkeypatch.setattr(jump.agents, name, mod, raising=False)
 
