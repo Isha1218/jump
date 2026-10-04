@@ -101,3 +101,42 @@ def test_page_js_skips_clutter_and_samples_each_section():
     assert "split(' ').length < 5" in js                     # (2) real text blocks only
     assert "perSection >= 2" in js                           # (3) first blocks under every heading
     assert "\n" not in js                                    # one line, for the AppleScript string
+
+
+def test_unreadable_page_script_output_does_not_crash(conn, monkeypatch):
+    monkeypatch.setattr(monitor, "_osascript", lambda script: "missing value")   # Chrome's answer when the script throws
+    try:
+        monitor.Chrome().page_text()
+        raised = False
+    except RuntimeError:
+        raised = True
+    assert raised                                         # turned into the error _capture already handles
+    logs = []
+    m = Monitor(conn, chrome=monitor.Chrome(), log=logs.append)
+    m.current = {"tab_id": "1", "url": "https://www.linkedin.com/in/x/", "title": "x", "start": 0,
+                 "from_url": None, "captured": False}
+    m._capture(m.current)
+    assert any("can't read page text" in line for line in logs)
+
+
+def test_monitor_keeps_running_after_an_error(conn):
+    import threading
+
+    class Flaky(FakeChrome):
+        calls = 0
+
+        def active_tab(self):
+            Flaky.calls += 1
+            if Flaky.calls == 1:
+                raise ValueError("boom")
+            if Flaky.calls > 3:
+                stop.set()
+            return None
+
+    stop, logs = threading.Event(), []
+    Monitor(conn, chrome=Flaky(), log=logs.append).run(stop, poll_s=0)
+    assert Flaky.calls > 1 and any("monitor error" in line for line in logs)
+
+
+def test_meta_selector_values_are_quoted():
+    assert 'meta[name="' in monitor._TEXT_JS               # og:description has a colon; unquoted it's invalid CSS

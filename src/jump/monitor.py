@@ -34,7 +34,7 @@ _TEXT_JS = " ".join("""
   const SKIP = 'nav, header, footer, aside, button, select, input, textarea, form, [role=navigation], [role=menu],
     [role=menubar], [role=toolbar], [role=banner], [role=dialog], [aria-hidden=true]';
   const clean = s => (s || '').replace(/\\s+/g, ' ').trim();
-  const meta = n => clean((document.querySelector('meta[name=' + n + '], meta[property=' + n + ']') || {}).content);
+  const meta = n => clean((document.querySelector('meta[name="' + n + '"], meta[property="' + n + '"]') || {}).content);
   const crumb = document.querySelector('[aria-label*=breadcrumb i], [class*=breadcrumb i]');
   const root = document.querySelector('main, [role=main]') || document.body;
   const outline = [], blocks = [];
@@ -95,7 +95,10 @@ class Chrome:
         """{url, headings, snippet} of the active tab, read from the rendered page."""
         js = _TEXT_JS.replace("\\", "\\\\").replace('"', '\\"')
         out = _osascript(f'tell application "Google Chrome" to execute active tab of front window javascript "{js}"')
-        data = json.loads(out or "{}")
+        try:
+            data = json.loads(out or "{}")
+        except json.JSONDecodeError:
+            raise RuntimeError(f"page script failed ({out!r})") from None
         snippet = compose_snippet(data.get("d", ""), data.get("b", ""), data.get("t", ""))
         return {"url": data.get("u", ""), "headings": data.get("h", []), "snippet": snippet}
 
@@ -125,8 +128,10 @@ class Monitor:
         try:
             text = self.chrome.page_text()
         except RuntimeError as e:
-            self.log(f"can't read page text ({e}); turn on Chrome → View → Developer → "
-                     "Allow JavaScript from Apple Events")
+            if "turned off" in str(e):
+                self.log("can't read page text; turn on Chrome → View → Developer → Allow JavaScript from Apple Events")
+            else:
+                self.log(f"can't read page text: {e}")
             return
         if urls.normalize(text["url"]) != cur["url"]:
             return  # the tab moved on before we read it
@@ -148,6 +153,9 @@ class Monitor:
 
     def run(self, stop: threading.Event, poll_s: float = POLL_S) -> None:
         while not stop.is_set():
-            self.tick(time.time())
+            try:
+                self.tick(time.time())
+            except Exception as e:   # one bad page must never stop monitoring
+                self.log(f"monitor error: {type(e).__name__}: {e}")
             stop.wait(poll_s)
         self.close(time.time())
