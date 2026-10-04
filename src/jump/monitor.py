@@ -13,7 +13,7 @@ from . import db, urls
 
 POLL_S = 2
 CAPTURE_AFTER_S = 3      # read page text once you've stayed this long
-SNIPPET_CHARS = 300
+SNIPPET_CHARS = 1000
 
 _TAB_SCRIPT = """
 if application "Google Chrome" is not running then return ""
@@ -26,12 +26,37 @@ tell application "Google Chrome"
 end tell
 """
 
-# Reads <main> (or <body>) so site menus don't crowd out the page's own text.
-_TEXT_JS = (
-    "(() => { const r = document.querySelector('main') || document.body;"
-    " const h = [...r.querySelectorAll('h1, h2, h3')].map(e => e.innerText.trim()).filter(Boolean).slice(0, 30);"
-    f" return JSON.stringify({{u: location.href, h: h, t: r.innerText.replace(/\\s+/g, ' ').trim().slice(0, {SNIPPET_CHARS})}}); }})()"
-)
+# Runs inside the tab. Reads (1) the page's own description + breadcrumb, (2) real text blocks only
+# (no menus, headers, footers, buttons, forms or hidden elements; >= 5 words), (3) across the whole page:
+# every h1-h3 as an outline, plus the first 2 text blocks under each heading.
+_TEXT_JS = " ".join("""
+(() => {
+  const SKIP = 'nav, header, footer, aside, button, select, input, textarea, form, [role=navigation], [role=menu],
+    [role=menubar], [role=toolbar], [role=banner], [role=dialog], [aria-hidden=true]';
+  const clean = s => (s || '').replace(/\\s+/g, ' ').trim();
+  const meta = n => clean((document.querySelector('meta[name=' + n + '], meta[property=' + n + ']') || {}).content);
+  const crumb = document.querySelector('[aria-label*=breadcrumb i], [class*=breadcrumb i]');
+  const root = document.querySelector('main, [role=main]') || document.body;
+  const outline = [], blocks = [];
+  let perSection = 0;
+  for (const el of root.querySelectorAll('h1, h2, h3, p, li, td, dd, blockquote')) {
+    if (el.closest(SKIP) || !el.getClientRects().length) continue;
+    const t = clean(el.innerText);
+    if (!t) continue;
+    if (/^H[1-3]$/.test(el.tagName)) { if (outline.length < 30) outline.push(t.slice(0, 120)); perSection = 0; continue; }
+    if (t.split(' ').length < 5 || perSection >= 2 || el.querySelector('p, li, td, dd')) continue;
+    blocks.push(t.slice(0, 300)); perSection++;
+  }
+  return JSON.stringify({u: location.href, h: outline, d: meta('description') || meta('og:description'),
+    b: crumb ? clean(crumb.innerText).slice(0, 200) : '', t: blocks.join(' … ')});
+})()
+""".split())
+
+
+def compose_snippet(description: str, breadcrumb: str, text: str) -> str:
+    """'Description: … | Breadcrumb: … | <text blocks>', capped at SNIPPET_CHARS."""
+    parts = [f"Description: {description}" if description else "", f"Breadcrumb: {breadcrumb}" if breadcrumb else "", text]
+    return " | ".join(p for p in parts if p)[:SNIPPET_CHARS]
 
 
 @dataclass
@@ -71,7 +96,8 @@ class Chrome:
         js = _TEXT_JS.replace("\\", "\\\\").replace('"', '\\"')
         out = _osascript(f'tell application "Google Chrome" to execute active tab of front window javascript "{js}"')
         data = json.loads(out or "{}")
-        return {"url": data.get("u", ""), "headings": data.get("h", []), "snippet": data.get("t", "")}
+        snippet = compose_snippet(data.get("d", ""), data.get("b", ""), data.get("t", ""))
+        return {"url": data.get("u", ""), "headings": data.get("h", []), "snippet": snippet}
 
 
 class Monitor:

@@ -84,3 +84,20 @@ def test_text_js_is_valid_inside_an_applescript_string():
     js = monitor._TEXT_JS.replace("\\", "\\\\").replace('"', '\\"')
     assert '"' not in js.replace('\\"', "")             # nothing would end the AppleScript string early
     assert "\\\\s+" in js                                # the regex backslash survives AppleScript escaping
+
+
+def test_compose_snippet_puts_description_and_breadcrumb_first():
+    s = monitor.compose_snippet("Discussion board for CSE 123", "CSE 123 › Discussion", "Is lab 2 due Friday?")
+    assert s == "Description: Discussion board for CSE 123 | Breadcrumb: CSE 123 › Discussion | Is lab 2 due Friday?"
+    assert monitor.compose_snippet("", "", "only text") == "only text"
+    assert len(monitor.compose_snippet("x" * 2000, "", "")) == monitor.SNIPPET_CHARS
+
+
+def test_page_js_skips_clutter_and_samples_each_section():
+    js = monitor._TEXT_JS
+    for skipped in ("nav", "header", "footer", "aside", "button", "form", "[aria-hidden=true]"):
+        assert skipped in js
+    assert "meta[name=" in js and "breadcrumb" in js         # (1) the page's own description
+    assert "split(' ').length < 5" in js                     # (2) real text blocks only
+    assert "perSection >= 2" in js                           # (3) first blocks under every heading
+    assert "\n" not in js                                    # one line, for the AppleScript string
