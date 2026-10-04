@@ -46,16 +46,6 @@ def _search(conn, args):
         pipeline.open_in_browser(results[choice - 1]["url"])
 
 
-def _login(conn, args):
-    from . import extract
-    extract.login(args.url)
-
-
-def _extract(conn, args):
-    from . import extract
-    print(json.dumps(extract.run(conn, limit=args.limit, headless=not args.show), indent=2))
-
-
 def _daemon(conn, args):
     from . import daemon
     daemon.run(conn)
@@ -91,13 +81,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--local", action="store_true", help="skip Jev, use local ranking only")
     p.add_argument("--open", action="store_true", help="pick a result and open it in Chrome")
     p.set_defaults(fn=_search)
-    p = sub.add_parser("login", help="open Jump's browser to sign in to your sites (once)")
-    p.add_argument("url", nargs="?", default="about:blank")
-    p.set_defaults(fn=_login)
-    p = sub.add_parser("extract", help="read the rendered text of visited pages")
-    p.add_argument("--limit", type=int, default=None)
-    p.add_argument("--show", action="store_true", help="show the browser instead of running headless")
-    p.set_defaults(fn=_extract)
     sub.add_parser("daemon", help="run all background agents").set_defaults(fn=_daemon)
     p = sub.add_parser("service", help="install/uninstall the launchd agent that keeps the daemon running")
     p.add_argument("action", choices=["install", "uninstall"])
