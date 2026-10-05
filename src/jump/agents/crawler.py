@@ -1,4 +1,5 @@
 """Crawler agent: drains `crawl` jobs. Fetches pages you visited recently and the pages one link away from them."""
+import re
 import sqlite3
 import time
 
@@ -8,6 +9,7 @@ from ..crawl.parse import parse
 from ..crawl.priority import Frontier, Patterns, link_base
 
 CONTENT_KINDS = {"application/pdf": "pdf"}
+LOGIN_FORM = re.compile(r"<input[^>]+type\s*=\s*[\"']?password", re.I)
 
 
 def run_pending(conn: sqlite3.Connection, max_jobs: int | None = None, fetch=None, delay: float | None = None) -> dict:
@@ -93,6 +95,8 @@ def _record(conn, place_id, url, res, prio, frontier, fetchable, pattern, origin
     if final != url:
         frontier.mark_done(final)
     page = parse(res.text, final) if res.status == 200 and res.is_html and res.text is not None else None
+    if page and LOGIN_FORM.search(res.text):
+        page, res.status = None, 401        # a sign-in page stands in for the real one: keep nothing from it
     now = time.time()
     new = 0
     links = []  # (target, anchor, context, in_scope, fetchable) -- robots lookups happen outside the transaction
@@ -108,8 +112,12 @@ def _record(conn, place_id, url, res, prio, frontier, fetchable, pattern, origin
             db.upsert_page(conn, url, place_id=place_id, crawled_at=now, fetch_status=res.status, **fields)
             conn.execute("COMMIT")
             return 0
-        from_id = db.upsert_page(conn, url, place_id=place_id, title=page.title, snippet=page.snippet,
-                                 headings=page.headings, kind="html", crawled_at=now, fetch_status=res.status)
+        # text read from your own tab (logged in, rendered) beats what a crawler sees
+        read = conn.execute("SELECT 1 FROM pages WHERE url = ? AND visited = 1 AND COALESCE(snippet, '') != ''",
+                            (url,)).fetchone()
+        text = {} if read else {"title": page.title, "snippet": page.snippet, "headings": page.headings}
+        from_id = db.upsert_page(conn, url, place_id=place_id, kind="html", crawled_at=now, fetch_status=res.status,
+                                 **text)
         frontier.observe({t for t, _, _, _, _ in links})
         for target, anchor, context, inside, ok in links:
             to_id = db.page_id(conn, target)

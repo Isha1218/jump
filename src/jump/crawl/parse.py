@@ -22,6 +22,9 @@ class ParsedPage:
     links: list[tuple[str, str, str]] = field(default_factory=list)  # (url, anchor, context)
 
 
+BARE_EMAIL = re.compile(r"[^/:?#\s@]+@[^/:?#\s@]+\.[a-z]{2,}", re.I)
+
+
 def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
@@ -61,6 +64,8 @@ def parse(html: str, url: str) -> ParsedPage:
 
     links: dict[str, tuple[str, str]] = {}
     for a in soup.find_all(["a", "area"], href=True):
+        if BARE_EMAIL.fullmatch(a["href"].strip()):
+            continue                       # "name@cs.example.edu" without mailto: is not a page
         target = urls.normalize(a["href"], base)
         if not target:
             continue
