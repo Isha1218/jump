@@ -24,12 +24,14 @@ def test_budgets_and_jobs(conn):
     jobs.post(conn, "rescored", {"place_id": ids["active"]}, dedupe_key=str(ids["active"]))
     jobs.post(conn, "rescored", {"place_id": ids["probation"]}, dedupe_key=str(ids["probation"]))
     res = planner.run_once(conn, now=NOW)
-    assert res == {"rescored_consumed": 2, "budgets_changed": 2, "crawl_jobs_posted": 1}
+    assert res == {"rescored_consumed": 2, "budgets_changed": 3, "crawl_jobs_posted": 2}
     budget = dict(conn.execute("SELECT id, budget FROM places").fetchall())
     assert budget[ids["active"]] == round(config.MAX_BUDGET * 0.8)
     assert budget[ids["fresh"]] == round(config.MAX_BUDGET * 0.6)
-    assert budget[ids["probation"]] == budget[ids["hub"]] == 0
-    assert [(r["pid"], r["budget"]) for r in crawl_jobs(conn)] == [(ids["active"], budget[ids["active"]])]
+    assert budget[ids["probation"]] == round(config.MAX_BUDGET * 0.3)
+    assert budget[ids["hub"]] == 0
+    assert [(r["pid"], r["budget"]) for r in crawl_jobs(conn)] == [
+        (ids["active"], budget[ids["active"]]), (ids["probation"], budget[ids["probation"]])]
     assert conn.execute("SELECT COUNT(*) FROM jobs WHERE type = 'rescored' AND status != 'done'").fetchone()[0] == 0
 
 
@@ -39,7 +41,7 @@ def test_dedupe_pending_and_running(conn):
     assert planner.run_once(conn, now=NOW)["crawl_jobs_posted"] == 0     # already pending
     jobs.claim(conn, ["crawl"])
     assert planner.run_once(conn, now=NOW)["crawl_jobs_posted"] == 0     # running
-    assert len(crawl_jobs(conn, "running")) == 1 and not crawl_jobs(conn)
+    assert len(crawl_jobs(conn, "running")) == 1 and len(crawl_jobs(conn)) == 1   # probation still pending
 
 
 def test_refresh_after(conn):
