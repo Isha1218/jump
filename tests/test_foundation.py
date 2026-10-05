@@ -52,6 +52,9 @@ def test_claim_is_exclusive_across_threads(tmp_path):
 def test_normalize():
     assert urls.normalize("/b#x", "https://X.edu:443/a/") == "https://x.edu/b"
     assert urls.normalize("https://x.edu/p?utm_source=a&id=3") == "https://x.edu/p?id=3"
+    ad = "https://muse.ai/app/95cc?campaign_id=24&extra_1=s%7Cc&partner_id=googlesem&gad_source=1&gbraid=0AA"
+    assert urls.normalize(ad) == "https://muse.ai/app/95cc"                    # from an ad: no query kept
+    assert urls.normalize("https://x.edu/p?id=3&fbclid=abc") == "https://x.edu/p?id=3"
     assert urls.normalize("mailto:a@b.c") is None
     assert urls.normalize("javascript:void(0)") is None
 
