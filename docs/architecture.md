@@ -50,9 +50,9 @@ Each module owns its tables' writes as listed. Function names below are called b
 - `pipeline.record_pick(conn, query, page_id)`, `pipeline.open_in_browser(url)` (macOS `open -a "Google Chrome"`).
 - Writes: FTS table, `picks`.
 
-### Namer — `jump.agents.namer`
-- `namer.run_once(conn, api_key=None, limit=50, client=None) -> dict` — for unnamed visited pages in active places (most-revisited first), one Gemini `generateContent` call (`gemini-flash-lite-latest`) with URL, tab title, headings and snippet → ≤8-word name, no pronouns → `pages.name`. Errors leave the page unnamed for the next run. Needs `GEMINI_API_KEY`.
-- Search labels use `name` when present; `name` is indexed with the title.
+### Namer — `jump.agents.namer`, `jump.naming`
+- `namer.run_once(conn) -> dict` — names every page from its own words, no AI: specific incoming link text; else the tab title with unread counts and the site's repeated ending (e.g. "– Ed Discussion", found on 3+ of the site's titles) removed; if that title is shared by 2+ pages of the site or is a default ("PowerPoint Presentation", "Untitled"), the first heading, else "title · last URL segment"; else the file/page name. Only changed names are written.
+- Search labels use `name`; Raycast shows the URL path under it for "where".
 
 ### Daemon — `jump.daemon`
 - `daemon.run(conn, stop=None, workers=2, cycle_s=300, chrome=None)` — monitor thread; watcher → planner → namer every `cycle_s`; crawler worker threads (own connections) draining `crawl` jobs; stale `running` jobs requeued on start.

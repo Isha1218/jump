@@ -23,7 +23,7 @@ def _crawl(conn, args):
 
 def _name(conn, args):
     from .agents import namer
-    print(json.dumps(namer.run_once(conn, limit=args.limit), indent=2))
+    print(json.dumps(namer.run_once(conn), indent=2))
 
 
 def _places(conn, args):
@@ -100,9 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("crawl", help="run pending crawl jobs")
     p.add_argument("--max-jobs", type=int, default=None)
     p.set_defaults(fn=_crawl)
-    p = sub.add_parser("name", help="give pages short descriptive names (needs GEMINI_API_KEY)")
-    p.add_argument("--limit", type=int, default=50)
-    p.set_defaults(fn=_name)
+    sub.add_parser("name", help="give pages short names from their own titles/headings").set_defaults(fn=_name)
     p = sub.add_parser("places", help="list places and their revisit scores")
     p.add_argument("--status", nargs="+", default=["active", "probation"])
     p.add_argument("--limit", type=int, default=30)

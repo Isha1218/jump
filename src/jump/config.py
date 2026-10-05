@@ -20,7 +20,6 @@ def load_keys(path: Path = KEYS_FILE) -> dict[str, str]:
 _keys = load_keys()
 # Environment variables win over the keys file.
 JEV_API_KEY = os.environ.get("JEV_API_KEY") or _keys.get("JEV_API_KEY")  # optional; search falls back to local ranking
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or _keys.get("GEMINI_API_KEY")  # optional; Namer runs only with it
 
 # Watcher: revisit scoring
 HISTORY_WINDOW_DAYS = 90         # visits older than this are ignored
