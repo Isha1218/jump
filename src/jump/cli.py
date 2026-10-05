@@ -54,6 +54,14 @@ def _search(conn, args):
         pipeline.open_in_browser(results[choice - 1]["url"])
 
 
+def _eval(conn, args):
+    from .search import pipeline
+    res = pipeline.evaluate(conn, use_jev=not args.local)
+    print(f"{res['cases']} past picks: picked page ranked #1 in {res['top1']:.0%}, top 5 in {res['top5']:.0%}")
+    for m in res["misses"]:
+        print(f"  {m['query']!r}: picked {m['picked']!r}, #1 was {m['got']!r}")
+
+
 def _monitor(conn, args):
     import threading
     from .monitor import Monitor
@@ -112,6 +120,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--open", action="store_true", help="pick a result and open it in Chrome")
     p.add_argument("--json", action="store_true", help="print results as JSON (used by the Raycast command)")
     p.set_defaults(fn=_search)
+    p = sub.add_parser("eval", help="replay past picks and report how well search ranks them")
+    p.add_argument("--local", action="store_true", help="skip Jev")
+    p.set_defaults(fn=_eval)
     sub.add_parser("daemon", help="run all background agents").set_defaults(fn=_daemon)
     p = sub.add_parser("service", help="install/uninstall the launchd agent that keeps the daemon running")
     p.add_argument("action", choices=["install", "uninstall"])
