@@ -144,9 +144,9 @@ def _url_key(url: str) -> str:
 
 
 # Only pages visited recently, or never-opened pages one link away from one.
-RECENT_FILTER = """WHERE (p.visited = 1 AND p.last_visit >= ?) OR (p.visited = 0 AND EXISTS (
+RECENT_FILTER = """AND ((p.visited = 1 AND p.last_visit >= ?) OR (p.visited = 0 AND EXISTS (
         SELECT 1 FROM links l JOIN pages f ON f.id = l.from_id
-        WHERE l.to_id = p.id AND f.visited = 1 AND f.last_visit >= ?))"""
+        WHERE l.to_id = p.id AND f.visited = 1 AND f.last_visit >= ?)))"""
 
 
 def retrieve(conn: sqlite3.Connection, query: str, k: int = CANDIDATES) -> list[dict]:
@@ -169,6 +169,7 @@ def retrieve(conn: sqlite3.Connection, query: str, k: int = CANDIDATES) -> list[
              WHERE l.to_id = p.id AND f.place_id IN ({scoped})) THEN {ALIAS_BOOST} ELSE 1.0 END AS boost,
         COALESCE(pl.alias, pl.origin) AS site
       FROM m JOIN pages p ON p.id = m.id LEFT JOIN places pl ON pl.id = p.place_id
+      WHERE COALESCE(pl.status, '') != 'hub'   -- search pages and other pass-through hubs are never results
       {RECENT_FILTER if config.RECENT_DAYS else ""}
     )
     SELECT *, rel * (0.5 + rv) * (1 + npicks) * boost AS score FROM s ORDER BY score DESC LIMIT ?

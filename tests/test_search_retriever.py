@@ -177,3 +177,12 @@ def test_description_has_host_and_untitled_pages_use_first_heading(conn):
     r = retriever.retrieve(conn, "canvas datacenter")[0]
     assert r["label"] == "CSE M 553 A Au 26: Datacenter Systems"          # not "1916633"
     assert "canvas.uw.edu/courses/1916633" in r["description"]           # Jev can see it's Canvas
+
+
+def test_search_pages_are_never_results(conn):
+    from jump import db
+    hub = db.upsert_place(conn, "https://www.google.com", "/", status="hub", revisit=0.8)
+    db.upsert_page(conn, "https://www.google.com/search?q=cse+453", place_id=hub, visited=1, title="cse 453 - Google Search")
+    course = db.upsert_place(conn, "https://courses.cs.washington.edu", "/courses/cse453/", status="active", revisit=0.7)
+    db.upsert_page(conn, "https://courses.cs.washington.edu/courses/cse453/26au/", place_id=course, visited=1, title="CSE 453")
+    assert [r["url"] for r in retriever.retrieve(conn, "cse 453")] == ["https://courses.cs.washington.edu/courses/cse453/26au/"]
