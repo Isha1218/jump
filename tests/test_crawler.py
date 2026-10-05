@@ -177,3 +177,17 @@ def test_run_pending(conn):
     assert st == ["done", "failed", "pending"]
     assert "no place 999" in conn.execute("SELECT error FROM jobs WHERE id = 2").fetchone()[0]
     assert crawler.run_pending(conn, fetch=FakeFetch(COURSE), delay=0)["jobs"] == 1
+
+
+def test_sign_in_pages_and_your_own_tab_text_are_not_overwritten(conn):
+    login = '<html><head><title>NetID sign-in</title></head><body><form><input type="password"></form></body></html>'
+    site = {C: page("CSE 452", f'<p><a href="grades.html">Grades</a> <a href="tsai@cs.test">tsai@cs.test</a></p>'),
+            C + "grades.html": login}
+    pid = make_place(conn, visited=[(C, 0.9)])
+    db.upsert_page(conn, C, snippet="Read from your tab", title="CSE 452 Home")
+    crawler.crawl_place(conn, pid, budget=10, fetch=FakeFetch(site), delay=0)
+    home, grades = row(conn, C), row(conn, C + "grades.html")
+    assert home["snippet"] == "Read from your tab" and home["title"] == "CSE 452 Home"
+    assert home["crawled_at"] is not None                                # links were still read
+    assert grades["fetch_status"] == 401 and not grades["snippet"]       # sign-in wall: nothing kept
+    assert row(conn, C + "tsai@cs.test") is None                         # bare email isn't a link
