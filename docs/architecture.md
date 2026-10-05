@@ -47,6 +47,7 @@ Each module owns its tables' writes as listed. Function names below are called b
 - `jev.rank(query, candidates, api_key, client=None) -> list[float] | None` — one `choice` question; returns probability per candidate, None on any failure. `jev.rank_with_confidence` also returns Jev's choice + confidence.
 - Candidates are limited to pages visited in the last `RECENT_DAYS` and never-opened pages one link away from them; lookalikes (same site + URL pattern) collapse to one.
 - `pipeline.search(conn, query, use_jev=True, api_key=None, client=None) -> list[dict]` — retrieve → Jev (if key, >1 candidate) → Jev probability × (1 + picks), hide < 0.1 → top `RESULTS`, each with `page_id, url, label, kind, probability|None`.
+- `pipeline.evaluate(conn, use_jev=True) -> dict` (`jump eval [--local]`) — replays every past pick's query with that pick hidden; reports the share ranked #1 / in the top 5 and the misses.
 - `pipeline.record_pick(conn, query, page_id)`, `pipeline.open_in_browser(url)` (macOS `open -a "Google Chrome"`).
 - Writes: FTS table, `picks`.
 

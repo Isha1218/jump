@@ -116,3 +116,14 @@ def test_a_picked_page_survives_the_cutoff(conn):
     probs = {f"c{i}": (0.09 if c["page_id"] == b else 0.01) for i, c in enumerate(cands)}
     res = pipeline.search(conn, "452 rpc lecture", api_key="k", client=_jev(probs))
     assert [r["page_id"] for r in res] == [b]          # 0.09 × (1 + 1 pick) = 0.18 ≥ 0.1
+
+
+def test_evaluate_replays_picks_without_their_own_boost(conn, monkeypatch):
+    monkeypatch.setattr(pipeline.config, "JEV_API_KEY", None)
+    g = build_graph(conn)
+    pipeline.record_pick(conn, "452 rpc lecture", g["l05"])        # local #1 already
+    pipeline.record_pick(conn, "452 rpc lecture", g["dropped"])    # not #1 without its own pick
+    res = pipeline.evaluate(conn, use_jev=False)
+    assert res["cases"] == 2 and res["top1"] == 0.5
+    assert [m["query"] for m in res["misses"]] == ["452 rpc lecture"]
+    assert conn.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 2  # picks restored

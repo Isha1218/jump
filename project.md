@@ -31,6 +31,7 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/jump plan && .venv/bin/jump crawl            # crawl active + probation places
 .venv/bin/jump name                                    # rebuild page names (the daemon does this every 5 min)
 .venv/bin/jump search "452 rpc lecture"                # uses Jev when JEV_API_KEY is set
+.venv/bin/jump eval                                    # how well past picks rank (--local skips Jev)
 .venv/bin/jump daemon                                  # run all agents continuously
 cd raycast && npm install && npm run dev               # load the Raycast command (once; Ctrl-C after it builds)
 .venv/bin/jump service install --load                  # keep the daemon running via launchd
