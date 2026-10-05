@@ -4,9 +4,11 @@ import time
 
 from .. import config, jobs
 
+CRAWLED = ("active", "probation")   # probation too, so a place gets crawled before it has days of history
+
 
 def run_once(conn: sqlite3.Connection, now: float | None = None) -> dict:
-    """Consume `rescored` jobs, set every place's budget, queue crawls for stale active places."""
+    """Consume `rescored` jobs, set every place's budget, queue crawls for stale active/probation places."""
     now = time.time() if now is None else now
     consumed = 0
     while (job := jobs.claim(conn, ["rescored"])):
@@ -19,7 +21,7 @@ def run_once(conn: sqlite3.Connection, now: float | None = None) -> dict:
     conn.execute("BEGIN IMMEDIATE")
     try:
         for p in conn.execute("SELECT id, status, revisit, budget, last_crawled FROM places").fetchall():
-            budget = round(config.MAX_BUDGET * p["revisit"]) if p["status"] == "active" else 0
+            budget = round(config.MAX_BUDGET * p["revisit"]) if p["status"] in CRAWLED else 0
             if budget != p["budget"]:
                 conn.execute("UPDATE places SET budget = ? WHERE id = ?", (budget, p["id"]))
                 budgets += 1

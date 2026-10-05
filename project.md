@@ -28,7 +28,7 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 # once: Chrome → View → Developer → Allow JavaScript from Apple Events
 .venv/bin/jump monitor                                 # record what you look at (Ctrl-C to stop)
 .venv/bin/jump watch && .venv/bin/jump places --why   # score places from recorded visits
-.venv/bin/jump plan && .venv/bin/jump crawl            # crawl active places
+.venv/bin/jump plan && .venv/bin/jump crawl            # crawl active + probation places
 .venv/bin/jump name                                    # rebuild page names (the daemon does this every 5 min)
 .venv/bin/jump search "452 rpc lecture"                # uses Jev when JEV_API_KEY is set
 .venv/bin/jump daemon                                  # run all agents continuously

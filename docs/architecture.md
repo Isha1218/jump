@@ -32,7 +32,7 @@ Each module owns its tables' writes as listed. Function names below are called b
 - Revisit score: `x = 1.5·ln(1+days) + 0.5·ln(1+breadth) − 1.0·bounce + 0.5·regular − 3`, `revisit = sigmoid(x)`; `days` = Σ distinct visit days of `0.5^(age/14)`. ≥0.5 active, ≥0.2 probation (dropped 14 days after the last visit), else dropped.
 
 ### Planner — `jump.agents.planner`
-- `planner.run_once(conn, now=None) -> dict` — consume `rescored` jobs; for active places set `budget = round(MAX_BUDGET·revisit)`, others 0; post `crawl` jobs `{place_id, budget}` (dedupe key = place id) for active places never crawled or with `last_crawled` older than `REFRESH_AFTER_S`.
+- `planner.run_once(conn, now=None) -> dict` — consume `rescored` jobs; for active and probation places set `budget = round(MAX_BUDGET·revisit)`, others 0; post `crawl` jobs `{place_id, budget}` (dedupe key = place id) for those places never crawled or with `last_crawled` older than `REFRESH_AFTER_S`.
 - Writes: `places.budget`, `jobs(crawl)`.
 
 ### Crawler — `jump.agents.crawler`, `jump.crawl.*`
