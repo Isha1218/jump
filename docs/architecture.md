@@ -22,7 +22,7 @@ Each module owns its tables' writes as listed. Function names below are called b
 - `jump.urls` — `normalize()`, `origin()`, `path_segments()`, `kind_from_url()`, `url_template()`, `in_scope()`, `relation()`, `is_action_url()`, `url_words()`.
 
 ### Monitor — `jump.monitor`
-- `Monitor(conn, chrome=None).tick(now)` / `.run(stop, poll_s=POLL_S)` — every 2s asks Chrome (AppleScript) for the frontmost window's active tab. A visit starts when the URL/tab changes and ends when it changes again or Chrome isn't frontmost; stored in `visits` with real `duration_s` and `from_url` = previous URL in the same tab. Incognito and non-web tabs are ignored. After 3s on a page, reads the rendered `<main>` (or `<body>`) via JavaScript: h1–h3 + first 300 chars → `pages.headings/snippet`; title → `pages.title`.
+- `Monitor(conn, chrome=None).tick(now)` / `.run(stop, poll_s=POLL_S)` — every 2s asks Chrome (AppleScript) for the frontmost window's active tab. A visit starts when the URL/tab changes and ends when it changes again or Chrome isn't frontmost; stored in `visits` with real `duration_s` and `from_url` = previous URL in the same tab. Incognito and non-web tabs are ignored. After 3s on a page (and again at 15s if it had no text yet), reads the rendered `<main>` (or `<body>`) via JavaScript: description, breadcrumb, h1–h3 outline and up to 2 text blocks per section (≥5 words, no nav/menus/forms); pages built from bare `<div>`s fall back to their first 6 innermost text `<div>`s → `pages.headings/snippet`; title → `pages.title`.
 - Needs Chrome → View → Developer → *Allow JavaScript from Apple Events* for text (visits are recorded without it).
 
 ### Watcher — `jump.agents.watcher`, `jump.places`, `jump.scoring`
