@@ -2,12 +2,15 @@
 import re
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
-TRACKING = re.compile(r"^(utm_.*|fbclid|gclid|mc_cid|mc_eid|ref_src)$", re.I)
+# Standard analytics params, the same on every site. A URL reached from an ad (has an ad-click id) keeps
+# no query at all: ad landings pile on made-up campaign params.
+TRACKING = re.compile(r"^(utm_.*|_ga|_gl|fbclid|igshid|mc_cid|mc_eid|ref_src)$", re.I)
+AD_CLICK = re.compile(r"^(gclid|gclsrc|dclid|gad_source|gad_campaignid|gbraid|wbraid|msclkid|twclid|yclid|li_fat_id)$", re.I)
 ACTION = re.compile(r"logout|log_out|signout|sign_out|delete|remove|unsubscribe|/edit\b", re.I)
 
 
 def normalize(url: str, base: str | None = None) -> str | None:
-    """Absolute http(s) URL without fragment, default port or tracking params; None if not web."""
+    """Absolute http(s) URL without fragment, default port or tracking params (any query, if from an ad); None if not web."""
     try:
         raw = urljoin(base, url) if base else url
         p = urlsplit(raw.strip())
@@ -18,7 +21,10 @@ def normalize(url: str, base: str | None = None) -> str | None:
     host = p.hostname.lower()
     if p.port and not ((p.scheme == "http" and p.port == 80) or (p.scheme == "https" and p.port == 443)):
         host = f"{host}:{p.port}"
-    query = urlencode([(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True) if not TRACKING.match(k)])
+    params = parse_qsl(p.query, keep_blank_values=True)
+    if any(AD_CLICK.match(k) for k, _ in params):
+        params = []
+    query = urlencode([(k, v) for k, v in params if not TRACKING.match(k)])
     return urlunsplit((p.scheme, host, p.path or "/", query, ""))
 
 
