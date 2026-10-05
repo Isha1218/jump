@@ -42,10 +42,6 @@ def _places(conn):
     return {r["scope"]: dict(r) for r in conn.execute("SELECT * FROM places")}
 
 
-def _pending(conn):
-    return conn.execute("SELECT COUNT(*) FROM jobs WHERE type = 'rescored' AND status = 'pending'").fetchone()[0]
-
-
 def test_run_once_builds_places_hubs_and_pages(conn, hist):
     s = watcher.run_once(conn, NOW)
     assert json.loads(json.dumps(s)) == s
@@ -63,30 +59,24 @@ def test_run_once_builds_places_hubs_and_pages(conn, hist):
     assert page["place_id"] == course["id"] and page["kind"] == "html" and page["revisit"] > 0.5
     assert conn.execute("SELECT kind FROM pages WHERE url LIKE '%l01.html'").fetchone()[0] == "html"
     assert not conn.execute("SELECT 1 FROM pages WHERE url LIKE 'https://search.example/%'").fetchone()
-    assert _pending(conn) == len(got) == s["rescored_jobs"]
 
 
 def test_run_once_is_idempotent(conn, hist):
     watcher.run_once(conn, NOW)
-    conn.execute("UPDATE jobs SET status = 'done'")
     conn.execute("UPDATE pages SET fts_dirty = 0")
     s = watcher.run_once(conn, NOW)
-    assert s["rescored_jobs"] == 0 and s["pages_updated"] == 0
-    assert _pending(conn) == 0
+    assert s["pages_updated"] == 0
     assert conn.execute("SELECT COUNT(*) FROM pages WHERE fts_dirty = 1").fetchone()[0] == 0
 
 
-def test_rescore_only_on_meaningful_change(conn, hist):
+def test_rescore_as_habits_change(conn, hist):
     watcher.run_once(conn, NOW)
-    conn.execute("UPDATE jobs SET status = 'done'")
     before = _places(conn)["https://b.org/"]["revisit"]
     for d in range(1, 6):                                           # b.org becomes a habit
         hist.visit("https://b.org/y", NOW + d * DAY, duration_s=300)
-    s = watcher.run_once(conn, NOW + 5 * DAY)
+    watcher.run_once(conn, NOW + 5 * DAY)
     after = _places(conn)["https://b.org/"]
     assert after["revisit"] > before + 0.05
-    payloads = [json.loads(r[0]) for r in conn.execute("SELECT payload FROM jobs WHERE status = 'pending'")]
-    assert {"place_id": after["id"], "_key": str(after["id"])} in payloads
 
 
 def test_probation_expires(conn):

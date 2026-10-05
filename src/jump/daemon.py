@@ -1,4 +1,5 @@
-"""Runs the background agents: Monitor (active Chrome tab) → Watcher → Planner every few minutes → Crawler workers.
+"""Runs the background agents: Monitor (active Chrome tab, queues crawls of the page you're on) → Crawler workers;
+Watcher → Namer every few minutes.
 
 Agents only share the database; this module just decides *when* each one runs.
 """
@@ -10,7 +11,7 @@ import threading
 from . import db, jobs
 from .monitor import Monitor
 
-CYCLE_S = 300            # regroup/rescore places and plan crawls this often
+CYCLE_S = 300            # regroup/rescore places and rename pages this often
 WORKER_IDLE_S = 5        # crawler poll interval when the queue is empty
 CRAWL_WORKERS = 2
 
@@ -22,10 +23,10 @@ def db_path(conn: sqlite3.Connection) -> str:
 
 
 def watch_cycle(conn: sqlite3.Connection) -> dict:
-    """One Watcher run, then the Planner and the Namer."""
-    from .agents import namer, planner, watcher
+    """One Watcher run, then the Namer."""
+    from .agents import namer, watcher
 
-    return {"watcher": watcher.run_once(conn), "planner": planner.run_once(conn), "namer": namer.run_once(conn)}
+    return {"watcher": watcher.run_once(conn), "namer": namer.run_once(conn)}
 
 
 def crawl_worker(path: str, stop: threading.Event, idle_s: float | None = None) -> None:

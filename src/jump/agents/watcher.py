@@ -1,8 +1,8 @@
-"""Watcher agent: recorded visits -> hubs, places, revisit scores -> `rescored` jobs."""
+"""Watcher agent: recorded visits -> hubs, places, revisit scores."""
 import sqlite3
 import time
 from collections import Counter, defaultdict
-from .. import config, db, jobs, places, scoring, urls
+from .. import config, db, places, scoring, urls
 
 
 def _status(revisit: float, last_visit: float, now: float) -> str:
@@ -20,13 +20,6 @@ def _hub_places(hub_urls: list[str], taken: set[str]) -> list[places.Place]:
         by_scope[(urls.origin(u), places.directory(u))].append(u)
     return [places.Place(o, p, sorted(us), places.alias(o, p))
             for (o, p), us in by_scope.items() if o + p not in taken]
-
-
-def _rescore(conn, place_id: int, prev, revisit: float, status: str) -> int:
-    """Post a `rescored` job if the place is new, its status changed or its score moved enough."""
-    if prev is not None and prev["status"] == status and abs(revisit - prev["revisit"]) < config.RESCORE_DELTA:
-        return 0
-    return int(jobs.post(conn, "rescored", {"place_id": place_id}, dedupe_key=str(place_id)) is not None)
 
 
 def run_once(conn: sqlite3.Connection, now: float | None = None) -> dict:
@@ -75,7 +68,6 @@ def _run(conn: sqlite3.Connection, now: float) -> dict:
         pid = db.upsert_place(conn, place.origin, place.path_prefix, alias=place.alias, revisit=revisit,
                               features=feats, first_seen=first, last_visit=last, status=status)
         counts[status] += 1
-        counts["rescored_jobs"] += _rescore(conn, pid, prev, revisit, status)
         if hub_place:
             continue
         for u in place.urls:
@@ -93,10 +85,9 @@ def _run(conn: sqlite3.Connection, now: float) -> dict:
             conn.execute("UPDATE places SET status = 'dropped', revisit = 0, updated_at = ? WHERE id = ?",
                          (now, prev["id"]))
             counts["retired"] += 1
-            counts["rescored_jobs"] += _rescore(conn, prev["id"], prev, 0.0, "dropped")
     return {
         "visits": len(visits), "places": len(regular),
         "active": counts["active"], "probation": counts["probation"], "dropped": counts["dropped"],
         "hubs": len(hub_only), "hub_urls": len(hubs), "pages_updated": counts["pages_updated"],
-        "retired": counts["retired"], "rescored_jobs": counts["rescored_jobs"],
+        "retired": counts["retired"],
     }

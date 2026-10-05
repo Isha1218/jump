@@ -11,11 +11,6 @@ def _watch(conn, args):
     print(json.dumps(watcher.run_once(conn), indent=2))
 
 
-def _plan(conn, args):
-    from .agents import planner
-    print(json.dumps(planner.run_once(conn), indent=2))
-
-
 def _crawl(conn, args):
     from .agents import crawler
     print(json.dumps(crawler.run_pending(conn, max_jobs=args.max_jobs), indent=2))
@@ -28,13 +23,13 @@ def _name(conn, args):
 
 def _places(conn, args):
     rows = conn.execute(
-        "SELECT p.scope, p.status, p.revisit, p.budget, COUNT(g.id) AS pages, p.features FROM places p "
+        "SELECT p.scope, p.status, p.revisit, COUNT(g.id) AS pages, p.features FROM places p "
         "LEFT JOIN pages g ON g.place_id = p.id WHERE p.status IN (" + ",".join("?" * len(args.status)) + ") "
         "GROUP BY p.id ORDER BY p.revisit DESC LIMIT ?",
         (*args.status, args.limit),
     ).fetchall()
     for r in rows:
-        print(f"{r['revisit']:.2f}  {r['status']:<9} {r['pages']:>4} pages  budget {r['budget']:>3}  {r['scope']}")
+        print(f"{r['revisit']:.2f}  {r['status']:<9} {r['pages']:>4} pages  {r['scope']}")
         if args.why and r["features"]:
             print("      " + r["features"])
 
@@ -104,7 +99,6 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(fn=_pick)
     sub.add_parser("monitor", help="record what you look at in Chrome (foreground)").set_defaults(fn=_monitor)
     sub.add_parser("watch", help="regroup and rescore places from recorded visits").set_defaults(fn=_watch)
-    sub.add_parser("plan", help="assign crawl budgets and queue crawl jobs").set_defaults(fn=_plan)
     p = sub.add_parser("crawl", help="run pending crawl jobs")
     p.add_argument("--max-jobs", type=int, default=None)
     p.set_defaults(fn=_crawl)

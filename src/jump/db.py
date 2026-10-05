@@ -15,11 +15,9 @@ CREATE TABLE IF NOT EXISTS places (
   alias TEXT,
   revisit REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'probation',  -- probation | active | dropped | hub
-  budget INTEGER NOT NULL DEFAULT 0,
   features TEXT,                       -- JSON of the inputs behind `revisit`
   first_seen REAL,
   last_visit REAL,
-  last_crawled REAL,
   updated_at REAL
 );
 
@@ -65,7 +63,7 @@ CREATE INDEX IF NOT EXISTS visits_ts ON visits(ts);
 
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY,
-  type TEXT NOT NULL,                  -- rescored | crawl
+  type TEXT NOT NULL,                  -- crawl
   payload TEXT NOT NULL,               -- JSON
   status TEXT NOT NULL DEFAULT 'pending',  -- pending | running | done | failed
   attempts INTEGER NOT NULL DEFAULT 0,

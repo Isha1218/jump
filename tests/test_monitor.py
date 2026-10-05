@@ -166,3 +166,32 @@ def test_monitor_keeps_running_after_an_error(conn):
 
 def test_meta_selector_values_are_quoted():
     assert 'meta[name="' in monitor._TEXT_JS               # og:description has a colon; unquoted it's invalid CSS
+
+
+def test_page_you_are_on_is_queued_for_crawling_once(conn):
+    import time
+    chrome = FakeChrome()
+    m = Monitor(conn, chrome=chrome, log=lambda *_: None)
+    url = "https://courses.cs.washington.edu/courses/cse452/26au/"
+    links = [[url + "lectures/l05.html", "notes", "Lecture 5 · RPC"]]
+    chrome.tab = Tab("1", False, url, "CSE 452")
+    chrome.text = {"url": url, "headings": [], "snippet": "Welcome", "links": links}
+    m.tick(0)
+    m.tick(monitor.CAPTURE_AT_S[0])
+    m.close(10)
+    m.tick(20)                                             # same page again
+    m.tick(20 + monitor.CAPTURE_AT_S[0])
+    rows = [json.loads(r[0]) for r in conn.execute("SELECT payload FROM jobs WHERE type = 'crawl'")]
+    assert len(rows) == 1 and rows[0]["url"] == url and rows[0]["links"] == links
+    conn.execute("UPDATE jobs SET status = 'done'")
+    conn.execute("UPDATE pages SET crawled_at = ? WHERE url = ?", (time.time(), url))
+    m.close(30)
+    m.tick(40)
+    m.tick(40 + monitor.CAPTURE_AT_S[0])                   # crawled lately: not queued again
+    assert conn.execute("SELECT COUNT(*) FROM jobs WHERE type = 'crawl'").fetchone()[0] == 1
+
+
+def test_page_js_reads_links_for_the_crawler():
+    js = monitor._TEXT_JS
+    assert "querySelectorAll('a[href]')" in js and "l: links" in js
+    assert "getAttribute('href')" in js                      # bare emails aren't links

@@ -29,17 +29,13 @@ BOUNCE_SECONDS = 10
 ACTIVE_THRESHOLD = 0.5
 PROBATION_THRESHOLD = 0.2
 PROBATION_DAYS = 14
-RESCORE_DELTA = 0.05             # post a `rescored` job when a score moves this much
 
 # Planner / crawler / search
 RECENT_DAYS = 30                 # only pages visited this recently (and pages one link away) count
-MAX_BUDGET = 500                 # budget = MAX_BUDGET * revisit
-HOP_DECAY = 0.7
-MIN_PRIORITY = 0.05
-SIDEWAYS_FACTOR = 0.5
+PAGE_BUDGET = 50                 # most pages fetched per page you're on
 CRAWL_DELAY_S = 1.0
 FETCH_TIMEOUT_S = 15
-REFRESH_AFTER_S = 24 * 3600
+REFRESH_AFTER_S = 24 * 3600      # don't crawl the same page again sooner
 USER_AGENT = "JumpBot/0.1 (personal navigation index)"
 
 # Search
