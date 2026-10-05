@@ -1,4 +1,5 @@
-"""Watches the active Chrome tab: records visits (with real time on page) and the text you're looking at.
+"""Watches the active Chrome tab: records visits (with real time on page) and the text you're looking at, and
+asks the Crawler to follow the links on the page you're on.
 
 Talks to your running Chrome through AppleScript. Needs Chrome → View → Developer →
 "Allow JavaScript from Apple Events" for page text; visits are recorded either way.
@@ -9,7 +10,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-from . import db, urls
+from . import config, db, jobs, urls
 
 POLL_S = 2
 CAPTURE_AT_S = (3, 15)   # read page text once you've stayed this long; again later if the page had none yet
@@ -30,6 +31,7 @@ end tell
 # (no menus, headers, footers, buttons, forms or hidden elements; >= 5 words), (3) across the whole page:
 # every h1-h3 as an outline, plus the first 2 text blocks under each heading. Pages built from bare <div>s
 # (X, Panopto, Gradescope) have no such blocks; then the first 6 innermost <div>s with >= 5 words are used.
+# (4) up to 300 links outside menus/headers/footers, as [url, link text, its row/list item] for the Crawler.
 _TEXT_JS = " ".join("""
 (() => {
   const SKIP = 'nav, header, footer, aside, button, select, input, textarea, form, [role=navigation], [role=menu],
@@ -54,8 +56,15 @@ _TEXT_JS = " ".join("""
     const t = clean(el.innerText);
     if (t.split(' ').length >= 5 && !blocks.includes(t.slice(0, 300))) blocks.push(t.slice(0, 300));
   }
+  const links = [];
+  for (const a of root.querySelectorAll('a[href]')) {
+    if (links.length >= 300) break;
+    if (!/^https?:/.test(a.href) || /^[^\\/:?#\\s@]+@[^\\/:?#\\s@]+$/.test(a.getAttribute('href')) || a.closest(SKIP)) continue;
+    const row = a.closest('li, tr, p, dd');
+    links.push([a.href, clean(a.innerText).slice(0, 120), row ? clean(row.innerText).slice(0, 200) : '']);
+  }
   return JSON.stringify({u: location.href, h: outline, d: meta('description') || meta('og:description'),
-    b: crumb ? clean(crumb.innerText).slice(0, 200) : '', t: blocks.join(' … ')});
+    b: crumb ? clean(crumb.innerText).slice(0, 200) : '', t: blocks.join(' … '), l: links});
 })()
 """.split())
 
@@ -99,7 +108,7 @@ class Chrome:
         return Tab(tab_id, mode == "incognito", url, title)
 
     def page_text(self) -> dict:
-        """{url, headings, snippet} of the active tab, read from the rendered page."""
+        """{url, headings, snippet, links} of the active tab, read from the rendered page."""
         js = _TEXT_JS.replace("\\", "\\\\").replace('"', '\\"')
         out = _osascript(f'tell application "Google Chrome" to execute active tab of front window javascript "{js}"')
         try:
@@ -107,7 +116,7 @@ class Chrome:
         except json.JSONDecodeError:
             raise RuntimeError(f"page script failed ({out!r})") from None
         snippet = compose_snippet(data.get("d", ""), data.get("b", ""), data.get("t", ""))
-        return {"url": data.get("u", ""), "headings": data.get("h", []), "snippet": snippet}
+        return {"url": data.get("u", ""), "headings": data.get("h", []), "snippet": snippet, "links": data.get("l", [])}
 
 
 class Monitor:
@@ -145,7 +154,17 @@ class Monitor:
         if urls.normalize(text["url"]) != cur["url"]:
             return False  # the tab moved on before we read it
         db.upsert_page(self.conn, cur["url"], headings=text["headings"], snippet=text["snippet"])
+        self._request_crawl(cur["url"], text.get("links") or [])
         return bool(text["snippet"])
+
+    def _request_crawl(self, url: str, links: list) -> None:
+        """Ask the Crawler to follow this page's links, unless it did so lately."""
+        if not links:
+            return
+        crawled = self.conn.execute("SELECT crawled_at FROM pages WHERE url = ?", (url,)).fetchone()
+        if crawled and crawled[0] and time.time() - crawled[0] < config.REFRESH_AFTER_S:
+            return
+        jobs.post(self.conn, "crawl", {"url": url, "links": links}, dedupe_key=url)
 
     def close(self, now: float) -> None:
         """Record the visit in progress, if any."""

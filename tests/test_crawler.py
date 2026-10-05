@@ -1,193 +1,105 @@
+import time
+
 from fakesite import FakeFetch
 
 from jump import config, db, jobs
 from jump.agents import crawler
 from jump.crawl.fetch import FetchResult
-from jump.crawl.priority import rarity
 
 O = "https://cs.test"
 C = O + "/c/"
-NAV = f'<nav><a href="{C}">Home</a> <a href="{C}staff.html">Staff</a> <a href="{C}syllabus.html">Syllabus</a></nav>'
 
 
 def page(title: str, body: str) -> str:
-    return f"<html><head><title>{title}</title></head><body>{NAV}<h1>{title}</h1>{body}</body></html>"
+    return f"<html><head><title>{title}</title></head><body><h1>{title}</h1>{body}</body></html>"
 
 
-def lecture(n: int, prev: int | None, nxt: int | None) -> str:
-    links = f'<a href="l{prev:02d}.html">Previous</a>' if prev else ""
-    links += f' <a href="l{nxt:02d}.html">Next</a>' if nxt else ""
-    return page(f"Lecture {n}", f'<p>Notes for lecture {n}. <a href="l{n:02d}.pdf">slides</a></p>{links}')
-
-
-ROWS = [(3, "Intro"), (4, "Clocks"), (5, "RPC")]
-COURSE = {
-    C: page("CSE 452", '<p>Welcome to CSE 452. Code is on <a href="https://github.com/">GitHub</a>.</p>'
-                       "<h2>Schedule</h2><table>" + "".join(
-        f'<tr><td>Lecture {n}</td><td>{t}</td><td><a href="lectures/l{n:02d}.pdf">slides</a></td></tr>'
-        for n, t in ROWS) + "</table>"),
-    C + "lectures/l03.html": lecture(3, None, 4),
-    C + "lectures/l04.html": lecture(4, 3, 5),
-    C + "lectures/l05.html": lecture(5, 4, None),
+SITE = {
+    C + "lectures/l05.html": page("Lecture 5", "<p>Notes for lecture 5: remote procedure calls.</p>"),
     C + "staff.html": page("Staff", "<p>TAs</p>"),
-    C + "syllabus.html": page("Syllabus", "<p>Grading</p>"),
+    O + "/other/news.html": page("News", "<p>Department news</p>"),
 }
-
-
-def make_place(conn, origin=O, prefix="/c/", revisit=0.9, visited=()):
-    pid = db.upsert_place(conn, origin, prefix, revisit=revisit, status="active")
-    for url, rv in visited:
-        db.upsert_page(conn, url, place_id=pid, visited=1, revisit=rv)
-    return pid
+# what the page script reads from your tab on the course home page: [url, link text, row]
+LINKS = [
+    [O + "/other/news.html", "News", ""],
+    [C + "lectures/l05.html", "notes", "Lecture 5 · RPC · notes · slides"],
+    [C + "lectures/l05.pdf", "slides", "Lecture 5 · RPC · notes · slides"],
+    ["https://github.com/", "GitHub", "Code is on GitHub"],
+    [C + "logout", "Log out", ""],
+]
 
 
 def row(conn, url):
     return conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
 
 
-def test_course_site(conn):
-    visited = [(C, 0.9), (C + "lectures/l03.html", 0.9), (C + "lectures/l04.html", 0.9)]
-    pid = make_place(conn, visited=visited)
-    f = FakeFetch(COURSE)
-    res = crawler.crawl_place(conn, pid, budget=50, fetch=f, delay=0)
+def visited_home(conn):
+    pid = db.upsert_place(conn, O, "/c/", revisit=0.9, status="probation")
+    db.upsert_page(conn, C, place_id=pid, visited=1, title="CSE 452", snippet="Read from your tab")
+    return pid
 
-    order = f.pages_fetched
-    assert res["stopped_reason"] == "frontier_empty"
-    assert set(order) == set(COURSE) and len(order) == len(COURSE)
-    assert order.index(C + "lectures/l05.html") < order.index(C + "staff.html")
-    assert res["fetched"] == len(COURSE)
 
-    # links are only read from the 3 visited pages: nav links are on all of them -> rarity ~0
-    n_pages = len(visited)
-    def linking(url):
-        return conn.execute("SELECT COUNT(*) FROM links WHERE to_id = ?", (db.page_id(conn, url),)).fetchone()[0]
-    assert rarity(n_pages, linking(C + "staff.html")) < 0.25
-    assert rarity(n_pages, linking(C + "syllabus.html")) < 0.25
-    assert rarity(n_pages, linking(C + "lectures/l05.html")) > 0.5
+def test_crawls_one_hop_from_the_page_you_are_on(conn):
+    pid = visited_home(conn)
+    f = FakeFetch(SITE)
+    res = crawler.crawl_page(conn, C, LINKS, fetch=f, delay=0)
 
-    pdf = row(conn, C + "lectures/l05.pdf")
-    assert pdf["kind"] == "pdf" and pdf["place_id"] == pid and pdf["fetch_status"] is None
-    ctx = conn.execute("SELECT context FROM links WHERE to_id = ? AND context LIKE 'Lecture%'", (pdf["id"],)).fetchone()
-    assert ctx["context"] == "Lecture 5 · RPC · slides"
-    gh = row(conn, "https://github.com/")
-    assert gh["place_id"] is None and gh["kind"] == "html" and gh["crawled_at"] is None
-    assert not any(".pdf" in u or "github" in u for u in f.calls)
-
+    # same-site HTML only, deeper links first; never PDFs, other sites or action URLs
+    assert f.pages_fetched == [C + "lectures/l05.html", O + "/other/news.html"]
+    assert res == {"fetched": 2, "discovered": 5}
     l05 = row(conn, C + "lectures/l05.html")
-    assert l05["title"] == "Lecture 5" and l05["fetch_status"] == 200 and l05["kind"] == "html"
-    # l05 is one link away: fetched for its text, but its own links are not followed or saved
+    assert l05["title"] == "Lecture 5" and "remote procedure calls" in l05["snippet"] and l05["place_id"] == pid
     assert conn.execute("SELECT COUNT(*) FROM links WHERE from_id = ?", (l05["id"],)).fetchone()[0] == 0
-    assert "Notes for lecture 5" in l05["snippet"] and l05["place_id"] == pid
-    l03 = row(conn, C + "lectures/l03.html")
-    assert l03["visited"] == 1 and l03["revisit"] == 0.9 and l03["crawled_at"]   # watcher columns untouched
-    assert conn.execute("SELECT last_crawled FROM places WHERE id = ?", (pid,)).fetchone()[0]
+    pdf = row(conn, C + "lectures/l05.pdf")
+    assert pdf["kind"] == "pdf" and pdf["place_id"] == pid and pdf["crawled_at"] is None
+    ctx = conn.execute("SELECT context FROM links WHERE to_id = ?", (pdf["id"],)).fetchone()[0]
+    assert ctx == "Lecture 5 · RPC · notes · slides"
+    assert row(conn, "https://github.com/")["place_id"] is None
+    assert row(conn, O + "/other/news.html")["place_id"] is None          # outside the place
+    home = row(conn, C)
+    assert home["crawled_at"] and home["snippet"] == "Read from your tab"  # links read from the tab, not refetched
 
 
-def test_nothing_crawled_without_visited_pages(conn):
-    pid = make_place(conn)
-    f = FakeFetch(COURSE)
-    res = crawler.crawl_place(conn, pid, budget=10, fetch=f, delay=0)
-    assert f.pages_fetched == [] and res["stopped_reason"] == "frontier_empty"
+def test_skips_pages_already_read_or_crawled_lately(conn):
+    visited_home(conn)
+    db.upsert_page(conn, C + "staff.html", visited=1, snippet="Read from your tab")
+    db.upsert_page(conn, O + "/other/news.html", crawled_at=time.time() - 60)
+    links = [[C + "staff.html", "Staff", ""], [O + "/other/news.html", "News", ""], [C + "lectures/l05.html", "", ""]]
+    f = FakeFetch(SITE)
+    crawler.crawl_page(conn, C, links, fetch=f, delay=0)
+    assert f.pages_fetched == [C + "lectures/l05.html"]
 
 
-def test_only_recent_visits_are_crawled(conn, monkeypatch):
-    import time
-    monkeypatch.setattr(config, "RECENT_DAYS", 30)
-    pid = make_place(conn)
-    db.upsert_page(conn, C + "lectures/l03.html", place_id=pid, visited=1, revisit=0.9, last_visit=time.time())
-    db.upsert_page(conn, C + "lectures/l04.html", place_id=pid, visited=1, revisit=0.9,
-                   last_visit=time.time() - 60 * 86400)
-    f = FakeFetch(COURSE)
-    crawler.crawl_place(conn, pid, budget=10, fetch=f, delay=0)
-    assert f.pages_fetched[0] == C + "lectures/l03.html" and C + "lectures/l05.html" not in f.pages_fetched
-
-
-def test_budget_on_open_ended_site(conn):
-    g = O + "/gen/"
-    def gen(url):
-        if url.startswith(g) and url.endswith(".html"):
-            n = int(url[len(g):-5])
-            return "<html><body>" + "".join(f'<a href="{n + k}.html">p{n + k}</a>' for k in range(1, 6)) + "</body></html>"
-    pid = make_place(conn, prefix="/gen/", visited=[(g + "1.html", 0.8)])
-    f = FakeFetch({}, fallback=gen)
-    res = crawler.crawl_place(conn, pid, budget=3, fetch=f, delay=0)
-    assert res["stopped_reason"] == "budget"
-    assert res["fetched"] == 3 == len(f.pages_fetched)
-
-
-def test_stops_one_link_away_on_a_deep_chain(conn):
-    pages = {}
-    url = O + "/d/"
-    for i in range(30):
-        nxt = f"{url}x{chr(97 + i)}/"
-        pages[url] = f'<a href="{nxt}">deeper</a>'
-        url = nxt
-    pid = make_place(conn, prefix="/d/", revisit=0.8, visited=[(O + "/d/", 0.8)])
-    f = FakeFetch(pages)
-    res = crawler.crawl_place(conn, pid, budget=100, fetch=f, delay=0)
-    assert f.pages_fetched == [O + "/d/", O + "/d/xa/"] and res["stopped_reason"] == "frontier_empty"
-
-
-def test_robots_and_action_urls(conn):
-    pages = {
-        O + "/robots.txt": "User-agent: *\nDisallow: /c/private/\n",
-        C: '<a href="private/grades.html">Grades</a> <a href="/c/logout">Log out</a> <a href="ok.html">ok</a>',
-        C + "ok.html": "<p>fine</p>",
-        C + "private/grades.html": "<p>secret</p>",
-        C + "logout": "<p>bye</p>",
-    }
-    pid = make_place(conn, visited=[(C, 0.9)])
-    f = FakeFetch(pages)
-    res = crawler.crawl_place(conn, pid, budget=10, fetch=f, delay=0)
-    assert f.pages_fetched == [C, C + "ok.html"]
-    assert res["stopped_reason"] == "frontier_empty"
-    for u in (C + "private/grades.html", C + "logout"):
-        r = row(conn, u)
-        assert r["place_id"] == pid and r["crawled_at"] is None
-
-
-def test_records_fetch_status_and_non_html(conn):
-    pages = {
-        C: '<a href="gone.html">gone</a> <a href="doc">doc</a>',
-        C + "doc": FetchResult(200, "application/pdf", C + "doc", None),
-    }
-    pid = make_place(conn, visited=[(C, 0.9)])
-    crawler.crawl_place(conn, pid, budget=10, fetch=FakeFetch(pages), delay=0)
+def test_budget_robots_and_status(conn, monkeypatch):
+    monkeypatch.setattr(config, "PAGE_BUDGET", 2)
+    site = {O + "/robots.txt": "User-agent: *\nDisallow: /c/private/\n",
+            C + "doc": FetchResult(200, "application/pdf", C + "doc", None)}
+    links = [[C + "private/grades.html", "", ""], [C + "gone.html", "", ""], [C + "doc", "", ""], [C + "more.html", "", ""]]
+    f = FakeFetch(site)
+    crawler.crawl_page(conn, C, links, fetch=f, delay=0)
+    assert f.pages_fetched == [C + "gone.html", C + "doc"]                # private disallowed; budget 2
     assert row(conn, C + "gone.html")["fetch_status"] == 404
-    doc = row(conn, C + "doc")
-    assert doc["fetch_status"] == 200 and doc["kind"] == "pdf"
+    assert row(conn, C + "doc")["kind"] == "pdf"
+    assert row(conn, C + "private/grades.html")["crawled_at"] is None
+
+
+def test_sign_in_pages_keep_nothing(conn):
+    login = '<html><head><title>NetID sign-in</title></head><body><form><input type="password"></form></body></html>'
+    crawler.crawl_page(conn, C, [[C + "grades.html", "Grades", ""]], fetch=FakeFetch({C + "grades.html": login}), delay=0)
+    grades = row(conn, C + "grades.html")
+    assert grades["fetch_status"] == 401 and not grades["snippet"] and not grades["title"]
 
 
 def test_delay_between_requests(conn, monkeypatch):
     sleeps = []
     monkeypatch.setattr(crawler.time, "sleep", sleeps.append)
-    pid = make_place(conn, visited=[(C, 0.9)])
-    crawler.crawl_place(conn, pid, budget=3, fetch=FakeFetch(COURSE), delay=5)
-    assert len(sleeps) == 2 and all(0 < s <= 5 for s in sleeps)
+    crawler.crawl_page(conn, C, LINKS, fetch=FakeFetch(SITE), delay=5)
+    assert len(sleeps) == 1 and 0 < sleeps[0] <= 5
 
 
 def test_run_pending(conn):
-    good = make_place(conn, visited=[(C, 0.9)])
-    jobs.post(conn, "crawl", {"place_id": good, "budget": 2}, dedupe_key=str(good))
-    jobs.post(conn, "crawl", {"place_id": 999, "budget": 2}, dedupe_key="999")
-    jobs.post(conn, "crawl", {"place_id": good, "budget": 2})
-    res = crawler.run_pending(conn, max_jobs=2, fetch=FakeFetch(COURSE), delay=0)
-    assert (res["jobs"], res["failed"], res["fetched"]) == (2, 1, 2) and res["discovered"] > 0
-    st = [r[0] for r in conn.execute("SELECT status FROM jobs ORDER BY id")]
-    assert st == ["done", "failed", "pending"]
-    assert "no place 999" in conn.execute("SELECT error FROM jobs WHERE id = 2").fetchone()[0]
-    assert crawler.run_pending(conn, fetch=FakeFetch(COURSE), delay=0)["jobs"] == 1
-
-
-def test_sign_in_pages_and_your_own_tab_text_are_not_overwritten(conn):
-    login = '<html><head><title>NetID sign-in</title></head><body><form><input type="password"></form></body></html>'
-    site = {C: page("CSE 452", f'<p><a href="grades.html">Grades</a> <a href="tsai@cs.test">tsai@cs.test</a></p>'),
-            C + "grades.html": login}
-    pid = make_place(conn, visited=[(C, 0.9)])
-    db.upsert_page(conn, C, snippet="Read from your tab", title="CSE 452 Home")
-    crawler.crawl_place(conn, pid, budget=10, fetch=FakeFetch(site), delay=0)
-    home, grades = row(conn, C), row(conn, C + "grades.html")
-    assert home["snippet"] == "Read from your tab" and home["title"] == "CSE 452 Home"
-    assert home["crawled_at"] is not None                                # links were still read
-    assert grades["fetch_status"] == 401 and not grades["snippet"]       # sign-in wall: nothing kept
-    assert row(conn, C + "tsai@cs.test") is None                         # bare email isn't a link
+    jobs.post(conn, "crawl", {"url": C, "links": LINKS}, dedupe_key=C)
+    jobs.post(conn, "crawl", {"url": C}, dedupe_key="broken")
+    res = crawler.run_pending(conn, fetch=FakeFetch(SITE), delay=0)
+    assert (res["jobs"], res["failed"], res["fetched"], res["discovered"]) == (2, 1, 2, 5)
+    assert [r[0] for r in conn.execute("SELECT status FROM jobs ORDER BY id")] == ["done", "failed"]

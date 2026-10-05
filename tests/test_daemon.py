@@ -10,18 +10,13 @@ from jump import daemon, db, jobs, service
 
 def _stub_agents(monkeypatch, calls):
     watcher = types.ModuleType("jump.agents.watcher")
-    planner = types.ModuleType("jump.agents.planner")
     crawler = types.ModuleType("jump.agents.crawler")
     namer = types.ModuleType("jump.agents.namer")
     namer.run_once = lambda conn: {}
 
     def w_run(conn, now=None):
         calls.append("watch")
-        return {}
-
-    def p_run(conn, now=None):
-        calls.append("plan")
-        jobs.post(conn, "crawl", {"place_id": 1, "budget": 3}, dedupe_key="1")
+        jobs.post(conn, "crawl", {"url": "https://x.test/", "links": []}, dedupe_key="x")
         return {}
 
     def c_run(conn, max_jobs=None, fetch=None, delay=None):
@@ -31,8 +26,8 @@ def _stub_agents(monkeypatch, calls):
             jobs.finish(conn, job["id"])
         return {"jobs": int(bool(job))}
 
-    watcher.run_once, planner.run_once, crawler.run_pending = w_run, p_run, c_run
-    for name, mod in [("watcher", watcher), ("planner", planner), ("crawler", crawler), ("namer", namer)]:
+    watcher.run_once, crawler.run_pending = w_run, c_run
+    for name, mod in [("watcher", watcher), ("crawler", crawler), ("namer", namer)]:
         monkeypatch.setitem(sys.modules, f"jump.agents.{name}", mod)
         monkeypatch.setattr(jump.agents, name, mod, raising=False)
 
@@ -57,14 +52,14 @@ def test_run_cycles_agents_and_drains_crawl_jobs(tmp_path, monkeypatch):
     stop.set()
     t.join(timeout=10)
     assert not t.is_alive()
-    assert calls[:2] == ["watch", "plan"]
+    assert calls[0] == "watch"
     assert "crawl" in calls and calls.count("watch") >= 2      # cycles repeat every cycle_s
     assert conn.execute("SELECT COUNT(*) FROM jobs WHERE type='crawl' AND status='done'").fetchone()[0] >= 1
 
 
 def test_stale_running_jobs_are_requeued(tmp_path):
     conn = db.connect(tmp_path / "g.db")
-    jid = jobs.post(conn, "crawl", {"place_id": 1})
+    jid = jobs.post(conn, "crawl", {"url": "https://x.test/", "links": []})
     jobs.claim(conn, ["crawl"])
     conn.execute("UPDATE jobs SET started_at = 0 WHERE id = ?", (jid,))
     assert jobs.requeue_stale(conn) == 1

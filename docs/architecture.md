@@ -3,10 +3,10 @@
 Two halves share one SQLite database (`~/.jump/graph.db`, schema in `src/jump/db.py`).
 
 ```
-BACKGROUND (daemon)                                   FOREGROUND (jump search)
-Active Chrome tab ─► MONITOR ─visits─► WATCHER ─rescored─► PLANNER ─crawl─► CRAWLER ×N      query ─► RETRIEVER ─► ≤200 ─► JEV ─► top 5
-                     │                   │                │                        │
-                     └──────────── SQLite: places · pages · links · visits · jobs · picks ────────────┘
+BACKGROUND (daemon)                                         FOREGROUND (jump search)
+Active Chrome tab ─► MONITOR ─┬─ crawl job (page you're on + its links) ─► CRAWLER ×N
+                              └─ visits ─► WATCHER ─► NAMER (every 5 min)     query ─► RETRIEVER ─► ≤200 ─► JEV ─► top 5
+                 all agents read/write SQLite: places · pages · links · visits · jobs · picks
 ```
 
 Agents never call each other. They read/write tables and coordinate through the `jobs` queue (`src/jump/jobs.py`).
@@ -22,24 +22,20 @@ Each module owns its tables' writes as listed. Function names below are called b
 - `jump.urls` — `normalize()`, `origin()`, `path_segments()`, `kind_from_url()`, `url_template()`, `in_scope()`, `relation()`, `is_action_url()`, `url_words()`.
 
 ### Monitor — `jump.monitor`
-- `Monitor(conn, chrome=None).tick(now)` / `.run(stop, poll_s=POLL_S)` — every 2s asks Chrome (AppleScript) for the frontmost window's active tab. A visit starts when the URL/tab changes and ends when it changes again or Chrome isn't frontmost; stored in `visits` with real `duration_s` and `from_url` = previous URL in the same tab. Incognito and non-web tabs are ignored. After 3s on a page (and again at 15s if it had no text yet), reads the rendered `<main>` (or `<body>`) via JavaScript: description, breadcrumb, h1–h3 outline and up to 2 text blocks per section (≥5 words, no nav/menus/forms); pages built from bare `<div>`s fall back to their first 6 innermost text `<div>`s → `pages.headings/snippet`; title → `pages.title`.
+- `Monitor(conn, chrome=None).tick(now)` / `.run(stop, poll_s=POLL_S)` — every 2s asks Chrome (AppleScript) for the frontmost window's active tab. A visit starts when the URL/tab changes and ends when it changes again or Chrome isn't frontmost; stored in `visits` with real `duration_s` and `from_url` = previous URL in the same tab. Incognito and non-web tabs are ignored. After 3s on a page (and again at 15s if it had no text yet), reads the rendered `<main>` (or `<body>`) via JavaScript: description, breadcrumb, h1–h3 outline and up to 2 text blocks per section (≥5 words, no nav/menus/forms); pages built from bare `<div>`s fall back to their first 6 innermost text `<div>`s → `pages.headings/snippet`; title → `pages.title`. The same script reads up to 300 links outside menus/headers/footers (url, text, row) and posts a `crawl` job `{url, links}` (dedupe key = url) unless the page was crawled in the last `REFRESH_AFTER_S`.
 - Needs Chrome → View → Developer → *Allow JavaScript from Apple Events* for text (visits are recorded without it).
 
 ### Watcher — `jump.agents.watcher`, `jump.places`, `jump.scoring`
-- `watcher.run_once(conn, now=None) -> dict` — over visits in the last `HISTORY_WINDOW_DAYS`: detect hubs, group URLs into places, compute revisit scores, set place status, upsert visited pages (`visited=1`, `place_id`, `revisit`), post `rescored` jobs `{place_id}` when a place is new, changes status or |Δrevisit| ≥ `RESCORE_DELTA`. One transaction; idempotent.
+- `watcher.run_once(conn, now=None) -> dict` — over visits in the last `HISTORY_WINDOW_DAYS`: detect hubs, group URLs into places, compute revisit scores, set place status, upsert visited pages (`visited=1`, `place_id`, `revisit`). One transaction; idempotent.
 - Hubs (search results, login redirects) by behavior: same path with mostly distinct queries linking out to many origins, or mostly bounces. Never stored as places or pages.
 - Places by path structure: split a level into tenants when children's subtrees share URL shapes (`github.com/<owner>/<repo>`); descend when one child holds ≥80% of visit-days; else the node is the place.
 - Revisit score: `x = 1.5·ln(1+days) + 0.5·ln(1+breadth) − 1.0·bounce + 0.5·regular − 3`, `revisit = sigmoid(x)`; `days` = Σ distinct visit days of `0.5^(age/14)`. ≥0.5 active, ≥0.2 probation (dropped 14 days after the last visit), else dropped.
 
-### Planner — `jump.agents.planner`
-- `planner.run_once(conn, now=None) -> dict` — consume `rescored` jobs; for active and probation places set `budget = round(MAX_BUDGET·revisit)`, others 0; post `crawl` jobs `{place_id, budget}` (dedupe key = place id) for those places never crawled or with `last_crawled` older than `REFRESH_AFTER_S`.
-- Writes: `places.budget`, `jobs(crawl)`.
-
 ### Crawler — `jump.agents.crawler`, `jump.crawl.*`
 - `crawler.run_pending(conn, max_jobs=None, fetch=None, delay=None) -> dict` — claim `crawl` jobs one at a time and run them. `fetch` injectable for tests.
-- `crawler.crawl_place(conn, place_id, budget, fetch=None, delay=None) -> dict` — seeds are the place's pages visited in the last `RECENT_DAYS` (30); links are read only from those, and pages one link away are fetched for their own text (their links aren't followed or saved), best first. Link priority = `parent · HOP_DECAY · rarity · scope · (1 + pattern)`; rarity = `ln(N/n)/ln(N)` over pages in the place containing the link; scope: deeper 1, sideways `SIDEWAYS_FACTOR`, outside 0 (record as unfetched page + link only); pattern = share of visited pages in the place sharing the link's `url_template`. Stop at `MIN_PRIORITY`, budget, or when the one-hop frontier is empty. A page with a password field is a sign-in wall: stored as status 401 with no text. Text the Monitor read from a visited page is never overwritten (only its links are added). robots.txt respected, `CRAWL_DELAY_S` between requests, GET only, skip `is_action_url`, never fetch non-HTML kinds (index them via link text).
-- Parsing: title, h1–h3 headings, snippet, links with anchor text and enclosing row/list-item context.
-- Writes: `pages` (crawled + discovered), `links`, `places.last_crawled`.
+- `crawler.crawl_page(conn, url, links, fetch=None, delay=None, budget=None) -> dict` — only ever for the page you're on: saves its links (read from your tab, so logged-in pages work) as pages + `links` rows, then fetches the same-site HTML pages they lead to for their own text (their links aren't followed or saved), deeper ones first, up to `PAGE_BUDGET` (50). Skips pages whose text was already read from your tab or that were crawled in the last `REFRESH_AFTER_S`. A page with a password field is a sign-in wall: stored as status 401 with no text. Text the Monitor read from a visited page is never overwritten (only its links are added). robots.txt respected, `CRAWL_DELAY_S` between requests, GET only, skip `is_action_url`, never fetch non-HTML kinds (index them via link text).
+- Parsing (fetched pages): title, h1–h3 headings, snippet.
+- Writes: `pages` (crawled + discovered), `links`.
 
 ### Search — `jump.search.retriever`, `jump.search.jev`, `jump.search.pipeline`
 - `retriever.sync_fts(conn) -> int` — rebuild FTS rows for `fts_dirty` pages (title, snippet, headings, incoming anchors, incoming contexts, `url_words`); clear the flag.
@@ -56,5 +52,5 @@ Each module owns its tables' writes as listed. Function names below are called b
 - Search labels use `name`; Raycast shows the URL path under it for "where".
 
 ### Daemon — `jump.daemon`
-- `daemon.run(conn, stop=None, workers=2, cycle_s=300, chrome=None)` — monitor thread; watcher → planner → namer every `cycle_s`; crawler worker threads (own connections) draining `crawl` jobs; stale `running` jobs requeued on start.
+- `daemon.run(conn, stop=None, workers=2, cycle_s=300, chrome=None)` — monitor thread; watcher → namer every `cycle_s`; crawler worker threads (own connections) draining `crawl` jobs; stale `running` jobs requeued on start.
 - `jump.service.install(load=False)` / `uninstall()` — launchd agent (`~/Library/LaunchAgents/com.jump.daemon.plist`): start at login, restart on crash.
