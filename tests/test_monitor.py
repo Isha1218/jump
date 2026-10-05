@@ -51,9 +51,35 @@ def test_captures_page_text_after_a_few_seconds(conn):
     chrome.text = {"url": url, "headings": ["CSE 452 Distributed Systems"], "snippet": "Lab 2 questions"}
     m.tick(0)
     assert conn.execute("SELECT snippet FROM pages WHERE url = ?", (url,)).fetchone() is None
-    m.tick(monitor.CAPTURE_AFTER_S)
+    m.tick(monitor.CAPTURE_AT_S[0])
     row = conn.execute("SELECT headings, snippet FROM pages WHERE url = ?", (url,)).fetchone()
     assert json.loads(row["headings"]) == ["CSE 452 Distributed Systems"] and row["snippet"] == "Lab 2 questions"
+
+
+def test_reads_text_again_later_when_the_page_had_none(conn):
+    chrome = FakeChrome()
+    m = Monitor(conn, chrome=chrome, log=lambda *_: None)
+    url = "https://x.com/home"
+    chrome.tab = Tab("1", False, url, "Home / X")
+    chrome.text = {"url": url, "headings": [], "snippet": ""}       # still loading
+    calls = []
+    real = chrome.page_text
+    chrome.page_text = lambda: calls.append(1) or real()
+    m.tick(0)
+    m.tick(monitor.CAPTURE_AT_S[0])
+    chrome.text = {"url": url, "headings": [], "snippet": "Cowboys win in overtime against the Eagles"}
+    m.tick(monitor.CAPTURE_AT_S[0] + 2)                               # not yet
+    m.tick(monitor.CAPTURE_AT_S[1])
+    m.tick(monitor.CAPTURE_AT_S[1] + 10)                              # done; no more reads
+    assert len(calls) == 2
+    snippet = conn.execute("SELECT snippet FROM pages WHERE url = ?", (url,)).fetchone()[0]
+    assert snippet.startswith("Cowboys win")
+
+
+def test_page_js_falls_back_to_innermost_divs():
+    js = monitor._TEXT_JS
+    assert "if (!blocks.length) for (const el of root.querySelectorAll('div'))" in js
+    assert "el.querySelector('div, p, li, td, section, article')" in js   # innermost only, no repeats
 
 
 def test_skips_incognito_and_non_web_tabs(conn):
@@ -114,7 +140,7 @@ def test_unreadable_page_script_output_does_not_crash(conn, monkeypatch):
     logs = []
     m = Monitor(conn, chrome=monitor.Chrome(), log=logs.append)
     m.current = {"tab_id": "1", "url": "https://www.linkedin.com/in/x/", "title": "x", "start": 0,
-                 "from_url": None, "captured": False}
+                 "from_url": None, "captures": [3]}
     m._capture(m.current)
     assert any("can't read page text" in line for line in logs)
 

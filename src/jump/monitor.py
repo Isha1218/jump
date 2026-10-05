@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from . import db, urls
 
 POLL_S = 2
-CAPTURE_AFTER_S = 3      # read page text once you've stayed this long
+CAPTURE_AT_S = (3, 15)   # read page text once you've stayed this long; again later if the page had none yet
 SNIPPET_CHARS = 1000
 
 _TAB_SCRIPT = """
@@ -28,7 +28,8 @@ end tell
 
 # Runs inside the tab. Reads (1) the page's own description + breadcrumb, (2) real text blocks only
 # (no menus, headers, footers, buttons, forms or hidden elements; >= 5 words), (3) across the whole page:
-# every h1-h3 as an outline, plus the first 2 text blocks under each heading.
+# every h1-h3 as an outline, plus the first 2 text blocks under each heading. Pages built from bare <div>s
+# (X, Panopto, Gradescope) have no such blocks; then the first 6 innermost <div>s with >= 5 words are used.
 _TEXT_JS = " ".join("""
 (() => {
   const SKIP = 'nav, header, footer, aside, button, select, input, textarea, form, [role=navigation], [role=menu],
@@ -46,6 +47,12 @@ _TEXT_JS = " ".join("""
     if (/^H[1-3]$/.test(el.tagName)) { if (outline.length < 30) outline.push(t.slice(0, 120)); perSection = 0; continue; }
     if (t.split(' ').length < 5 || perSection >= 2 || el.querySelector('p, li, td, dd')) continue;
     blocks.push(t.slice(0, 300)); perSection++;
+  }
+  if (!blocks.length) for (const el of root.querySelectorAll('div')) {
+    if (blocks.length >= 6) break;
+    if (el.querySelector('div, p, li, td, section, article') || el.closest(SKIP) || !el.getClientRects().length) continue;
+    const t = clean(el.innerText);
+    if (t.split(' ').length >= 5 && !blocks.includes(t.slice(0, 300))) blocks.push(t.slice(0, 300));
   }
   return JSON.stringify({u: location.href, h: outline, d: meta('description') || meta('og:description'),
     b: crumb ? clean(crumb.innerText).slice(0, 200) : '', t: blocks.join(' … ')});
@@ -118,13 +125,15 @@ class Monitor:
         if url and not self.current:
             ref = self.prev_in_tab.get(tab.id)
             self.current = {"tab_id": tab.id, "url": url, "title": tab.title, "start": now,
-                            "from_url": ref if ref != url else None, "captured": False}
+                            "from_url": ref if ref != url else None, "captures": list(CAPTURE_AT_S)}
         cur = self.current
-        if cur and not cur["captured"] and now - cur["start"] >= CAPTURE_AFTER_S:
-            cur["captured"] = True
-            self._capture(cur)
+        if cur and cur["captures"] and now - cur["start"] >= cur["captures"][0]:
+            cur["captures"].pop(0)
+            if self._capture(cur):
+                cur["captures"] = []
 
-    def _capture(self, cur: dict) -> None:
+    def _capture(self, cur: dict) -> bool:
+        """Store the page's text; True once it had some."""
         try:
             text = self.chrome.page_text()
         except RuntimeError as e:
@@ -132,10 +141,11 @@ class Monitor:
                 self.log("can't read page text; turn on Chrome → View → Developer → Allow JavaScript from Apple Events")
             else:
                 self.log(f"can't read page text: {e}")
-            return
+            return False
         if urls.normalize(text["url"]) != cur["url"]:
-            return  # the tab moved on before we read it
+            return False  # the tab moved on before we read it
         db.upsert_page(self.conn, cur["url"], headings=text["headings"], snippet=text["snippet"])
+        return bool(text["snippet"])
 
     def close(self, now: float) -> None:
         """Record the visit in progress, if any."""
