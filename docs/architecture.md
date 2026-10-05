@@ -43,7 +43,7 @@ Each module owns its tables' writes as listed. Function names below are called b
 
 ### Search — `jump.search.retriever`, `jump.search.jev`, `jump.search.pipeline`
 - `retriever.sync_fts(conn) -> int` — rebuild FTS rows for `fts_dirty` pages (title, snippet, headings, incoming anchors, incoming contexts, `url_words`); clear the flag.
-- `retriever.retrieve(conn, query, k=CANDIDATES) -> list[dict]` — (BM25 + 2 per matched term) × `(0.5 + revisit)` × `(1 + picks)`; revisit = max(page, its place), else max of places linking to it; alias match ×3. Dicts have `page_id, url, kind, label, description, score`.
+- `retriever.retrieve(conn, query, k=CANDIDATES) -> list[dict]` — (BM25 + 2 per matched term) × `(0.5 + revisit)` × `(1 + picks)`, counting only past picks whose query's words are all in this one or vice versa; revisit = max(page, its place), else max of places linking to it; alias match ×3. Dicts have `page_id, url, kind, label, description, score`.
 - `jev.rank(query, candidates, api_key, client=None) -> list[float] | None` — one `choice` question; returns probability per candidate, None on any failure. `jev.rank_with_confidence` also returns Jev's choice + confidence.
 - Candidates are limited to pages visited in the last `RECENT_DAYS` and never-opened pages one link away from them; lookalikes (same site + URL pattern) collapse to one.
 - `pipeline.search(conn, query, use_jev=True, api_key=None, client=None) -> list[dict]` — retrieve → Jev (if key, >1 candidate) → Jev probability × (1 + picks), hide < 0.1 → top `RESULTS`, each with `page_id, url, label, kind, probability|None`.
