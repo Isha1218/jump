@@ -83,6 +83,23 @@ def test_picks_boost(conn):
     assert ids_of(retriever.retrieve(conn, "webhooks"))[0] == g["gh_hooks"]
 
 
+def test_picks_only_boost_related_queries(conn):
+    g = build_graph(conn)
+    for _ in range(3):
+        conn.execute("INSERT INTO picks(query, page_id, ts) VALUES ('stripe webhooks guide', ?, 0)", (g["gh_hooks"],))
+    picks = lambda q: next(c["picks"] for c in retriever.retrieve(conn, q) if c["page_id"] == g["gh_hooks"])
+    assert picks("webhooks") == 3                       # its words are all in the past query: counts
+    assert picks("github webhooks settings") == 0       # different words: doesn't
+    assert ids_of(retriever.retrieve(conn, "webhooks"))[0] == g["gh_hooks"]
+
+
+def test_pick_applies():
+    assert retriever.pick_applies("cse 452 rpc lecture", "452 rpc")
+    assert retriever.pick_applies("452 rpc", "cse 452 rpc lecture")
+    assert not retriever.pick_applies("cse 452 canvas", "cse 552 canvas")
+    assert not retriever.pick_applies("cse 452 canvas", "cowboys vs texans")
+
+
 def test_outside_pdf_inherits_linking_place_revisit(conn):
     g = build_graph(conn)
     ext = db.upsert_page(conn, "https://papers.example.org/birrell-rpc.pdf", kind="pdf")

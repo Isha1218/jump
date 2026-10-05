@@ -149,8 +149,15 @@ RECENT_FILTER = """AND ((p.visited = 1 AND p.last_visit >= ?) OR (p.visited = 0 
         WHERE l.to_id = p.id AND f.visited = 1 AND f.last_visit >= ?)))"""
 
 
+def pick_applies(past_query: str, query: str) -> bool:
+    """A past pick counts for this query when one query's words are all in the other ("452 rpc" ~ "cse 452 rpc
+    lecture", but not "cse 452 canvas" ~ "cse 552 canvas")."""
+    a, b = set(tokens(past_query)), set(tokens(query))
+    return bool(a and b) and (a <= b or b <= a)
+
+
 def retrieve(conn: sqlite3.Connection, query: str, k: int = CANDIDATES) -> list[dict]:
-    """Top-k candidates: dicts with page_id, url, kind, label, description, score."""
+    """Top-k candidates: dicts with page_id, url, kind, label, description, score, picks (past picks for this query)."""
     sync_fts(conn)
     groups = [_or(g) for g in query_terms(query)]
     if not groups:
@@ -164,7 +171,7 @@ def retrieve(conn: sqlite3.Connection, query: str, k: int = CANDIDATES) -> list[
       SELECT p.id, p.url, p.kind, p.name, p.title, p.headings, p.snippet, m.rel + {COVERAGE} * ({covered}) AS rel,
         MAX(p.revisit, COALESCE(pl.revisit, (SELECT MAX(lp.revisit) FROM links l JOIN pages f ON f.id = l.from_id
                                              JOIN places lp ON lp.id = f.place_id WHERE l.to_id = p.id), 0)) AS rv,
-        (SELECT COUNT(*) FROM picks WHERE page_id = p.id) AS npicks,
+        (SELECT COUNT(*) FROM picks WHERE page_id = p.id AND pick_applies(picks.query)) AS npicks,
         CASE WHEN p.place_id IN ({scoped}) OR EXISTS (SELECT 1 FROM links l JOIN pages f ON f.id = l.from_id
              WHERE l.to_id = p.id AND f.place_id IN ({scoped})) THEN {ALIAS_BOOST} ELSE 1.0 END AS boost,
         COALESCE(pl.alias, pl.origin) AS site
@@ -174,6 +181,7 @@ def retrieve(conn: sqlite3.Connection, query: str, k: int = CANDIDATES) -> list[
     )
     SELECT *, rel * (0.5 + rv) * (1 + npicks) * boost AS score FROM s ORDER BY score DESC LIMIT ?
     """
+    conn.create_function("pick_applies", 1, lambda past: pick_applies(past, query), deterministic=True)
     try:
         recent = [time.time() - config.RECENT_DAYS * 86400] * 2 if config.RECENT_DAYS else []
         rows = conn.execute(sql, (" OR ".join(groups), *groups, *recent, 2 * k)).fetchall()
